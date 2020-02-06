@@ -35,7 +35,7 @@ int drdy=48; // Data is ready pin on ADC
 int led = 32;
 int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
 int err=30;
-const int Noperations = 25;
+const int Noperations = 26;
 String operations[Noperations] = {"NOP", "INT_RAMP", "SET", "GET_DAC", "GET_ADC", "RAMP_SMART", "RAMP1", "RAMP2", "BUFFER_RAMP", "CAL_ADC_WITH_DAC", "RESET", "TALK", "CONVERT_TIME", "*IDN?", "*RDY?", "GET_DUNIT","SET_DUNIT", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "DAC_RESET_CAL", "FULL_SCALE", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "WRITE_ADC_CAL", "READ_ADC_CAL"};
 int delayUnit=0; // 0=microseconds 1=miliseconds
 
@@ -563,6 +563,7 @@ void autoRamp1(std::vector<String> DB)
     SerialUSB.println("SYNTAX ERROR");
     return;
   }
+
   float v1 = DB[2].toFloat();
   float v2 = DB[3].toFloat();
   int nSteps = DB[4].toInt();
@@ -662,8 +663,8 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   float channel = DB[1].toInt();
   float setpoint = DB[2].toFloat();
   float ramprate = DB[3].toFloat();
+  float initial = getDAC(channel)*1000;  //From V to mV
 
-  float initial = getDAC(channel);
   if (abs(setpoint-initial) < 0.05)  //If already at setpoint
   {
     return;
@@ -671,14 +672,15 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   // TODO: calc ramprate, make vector string, pass to autoRamp1
   int nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
 
-  vector<string> autoRampInput;
+  std::vector<String> autoRampInput;
   autoRampInput.push_back("RAMP1");
-  autoRampInput.push_back(to_string(channel));
-  autoRampInput.push_back(to_string(initial));
-  autoRampInput.push_back(to_string(setpoint));
-  autoRampInput.push_back(to_string(nSteps));
-  autoRampInput.push_back(to_string("1000")); //1000us delay between steps
-  autoRamp1(autoRampInput)
+  autoRampInput.push_back(String(channel));
+  autoRampInput.push_back(String(initial/1000));  //from mV to V
+  autoRampInput.push_back(String(setpoint/1000)); //from mV to V
+  autoRampInput.push_back(String(nSteps));
+  autoRampInput.push_back("1000"); //1000us delay between steps
+  autoRamp1(autoRampInput);
+
 }
 
 void router(std::vector<String> DB)
