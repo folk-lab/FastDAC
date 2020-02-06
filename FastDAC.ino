@@ -24,8 +24,8 @@
 int adc=52; //The SPI pin for the ADC
 int dac0 = 4; //The SPI pin for the DAC0
 int dac1 = 10; //The SPI pin for the DAC1
-int ldac0=6; //Load DAC1 pin for DAC1. Make it LOW if not in use. 
-int ldac1=9; //Load DAC2 pin for DAC1. Make it LOW if not in use. 
+int ldac0=6; //Load DAC1 pin for DAC1. Make it LOW if not in use.
+int ldac1=9; //Load DAC2 pin for DAC1. Make it LOW if not in use.
 Pio *ldac_port = digitalPinToPort(ldac0); //ldac0 and ldac1 share the same port, so they can be toggled simultaneously
 uint32_t ldac0_mask = digitalPinToBitMask(ldac0);
 uint32_t ldac1_mask = digitalPinToBitMask(ldac1);
@@ -36,7 +36,7 @@ int led = 32;
 int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
 int err=30;
 const int Noperations = 25;
-String operations[Noperations] = {"NOP", "INT_RAMP", "SET", "GET_DAC", "GET_ADC", "RAMP1", "RAMP2", "BUFFER_RAMP", "CAL_ADC_WITH_DAC", "RESET", "TALK", "CONVERT_TIME", "*IDN?", "*RDY?", "GET_DUNIT","SET_DUNIT", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "DAC_RESET_CAL", "FULL_SCALE", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "WRITE_ADC_CAL", "READ_ADC_CAL"};
+String operations[Noperations] = {"NOP", "INT_RAMP", "SET", "GET_DAC", "GET_ADC", "RAMP_SMART", "RAMP1", "RAMP2", "BUFFER_RAMP", "CAL_ADC_WITH_DAC", "RESET", "TALK", "CONVERT_TIME", "*IDN?", "*RDY?", "GET_DUNIT","SET_DUNIT", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "DAC_RESET_CAL", "FULL_SCALE", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "WRITE_ADC_CAL", "READ_ADC_CAL"};
 int delayUnit=0; // 0=microseconds 1=miliseconds
 
 float DAC_FULL_SCALE = 10.0;
@@ -83,7 +83,7 @@ std::vector<String> query_serial()
       else
       {
         inByte += received;
-      }        
+      }
     }
   }
   return comm;
@@ -105,32 +105,32 @@ namespace std {
 void setup()
 {
   //SerialUSB.begin(115200);
-  
+
   SerialUSB.begin(2000000);
- 
-  pinMode(ldac0,OUTPUT);   
-  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use. 
-  
-  pinMode(ldac1,OUTPUT);   
-  digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use. 
-  
+
+  pinMode(ldac0,OUTPUT);
+  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
+
+  pinMode(ldac1,OUTPUT);
+  digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
+
   //pinMode(spi,OUTPUT);
   pinMode(reset, OUTPUT);
-  pinMode(drdy, INPUT);  //Data ready pin for the ADC.  
+  pinMode(drdy, INPUT);  //Data ready pin for the ADC.
   pinMode(led, OUTPUT);  //Used for blinking indicator LED
   digitalWrite(led, HIGH);
   pinMode(data, OUTPUT);
-  
-  digitalWrite(reset,HIGH);  digitalWrite(data,LOW); digitalWrite(reset,LOW);  digitalWrite(data,HIGH); delay(5);  digitalWrite(reset,HIGH);  digitalWrite(data,LOW);//Resets ADC on startup.  
+
+  digitalWrite(reset,HIGH);  digitalWrite(data,LOW); digitalWrite(reset,LOW);  digitalWrite(data,HIGH); delay(5);  digitalWrite(reset,HIGH);  digitalWrite(data,LOW);//Resets ADC on startup.
 
   SPI.begin(adc); // wake up the SPI bus for ADC
   SPI.begin(dac0); // wake up the SPI bus for DAC0
   SPI.begin(dac1); // wake up the SPI bus for DAC1
-  
+
   SPI.setBitOrder(adc,MSBFIRST); //correct order for AD7734.
   SPI.setBitOrder(dac0,MSBFIRST); //correct order for AD5764.
   SPI.setBitOrder(dac1,MSBFIRST); //correct order for AD5764.
-  
+
   SPI.setClockDivider(adc,7); // Maximum 12 Mhz for AD7734
   SPI.setClockDivider(dac0,4); // Maximum 21 Mhz for AD5764
   SPI.setClockDivider(dac1,4); // Maximum 21 Mhz for AD5764
@@ -177,17 +177,17 @@ int indexOfOperation(String operation)
 
 void waitDRDY() {while (digitalRead(drdy)==HIGH){}}
 
-void resetADC() //Resets the ADC, and sets the range to default +-10 V 
+void resetADC() //Resets the ADC, and sets the range to default +-10 V
 {
   byte ch = 0;
-  
+
   digitalWrite(data,HIGH);digitalWrite(reset,HIGH);digitalWrite(reset,LOW);digitalWrite(reset,HIGH);
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     SPI.transfer(adc, ADC_CHSETUP | ch);//Access channel setup register for each channel
     SPI.transfer(adc, ADC_CHSETUP_RNG10BI);//set +/-10V range
   }
-  
+
 }
 
 void talkADC(std::vector<String> DB)
@@ -220,7 +220,7 @@ void writeADCConversionTime(std::vector<String> DB)
     adcChannel = 3;
     break;
 
-    default:  
+    default:
     break;
   }
   byte cr;
@@ -235,9 +235,9 @@ void writeADCConversionTime(std::vector<String> DB)
     fw = 2;
   }
   fw |= 0x80; //enable chopping
-  
+
   //fw = 3; //max speed test
-  
+
   SPI.transfer(adc, ADC_CHCONVTIME | adcChannel); //Write conversion time register
   SPI.transfer(adc, fw); //Write 'filter word' (conversion time)
   delayMicroseconds(100);
@@ -262,14 +262,14 @@ int twoByteToInt(byte DB1,byte DB2) // This gives a 16 bit integer (between +/- 
 void intToTwoByte(int s, byte * DB1, byte * DB2)
 {
     *DB1 = ((byte)((s>>8)&0xFF));
-    *DB2 = ((byte)(s&0xFF)); 
+    *DB2 = ((byte)(s&0xFF));
 }
 
 
 float int16ToVoltage(int16_t data)
 {
-  
-  float voltage;  
+
+  float voltage;
 
   if (data >= 0)
   {
@@ -286,10 +286,10 @@ int16_t voltageToInt16(float voltage)
 {
   int decimal;
   if (voltage > DAC_FULL_SCALE || voltage < -1*DAC_FULL_SCALE)
-  {    
+  {
     error();
     return 0;
-  }  
+  }
   else if (voltage >= 0)
   {
     return voltage*32767/DAC_FULL_SCALE;
@@ -297,7 +297,7 @@ int16_t voltageToInt16(float voltage)
   else
   {
     return voltage*32768/DAC_FULL_SCALE;
-  }  
+  }
 }
 
 int32_t voltageToInt32(float voltage)
@@ -307,14 +307,14 @@ int32_t voltageToInt32(float voltage)
   {
     calcint = 0;
     error();
-  }  
+  }
   else if(voltage >=0)
   {
     calcint = (int32_t)((voltage/DAC_FULL_SCALE) * 0x7FFFFFFF);
   }
   else
   {
-    calcint = (int32_t)((voltage/DAC_FULL_SCALE) * 0x80000000);  
+    calcint = (int32_t)((voltage/DAC_FULL_SCALE) * 0x80000000);
   }
   return calcint;
 }
@@ -351,10 +351,10 @@ float getSingleReading(int adcchan)
       voltage = map2(decimal, 0, 65536, -10.0, 10.0);
       return voltage;
       break;
-      
+
       case 1:
       return 0.0;
-      break;   
+      break;
     }
   }
 }
@@ -377,7 +377,7 @@ float readADC(byte DB)
     return getSingleReading(3);
     break;
 
-    default:  
+    default:
     break;
   }
 }
@@ -400,14 +400,14 @@ float writeDAC(int dacChannel, float voltage, bool load)
     return 99.999;
   }
   digitalWrite(data, HIGH);
-  actualvoltage = dacDataSend(dacChannel, voltage);  
+  actualvoltage = dacDataSend(dacChannel, voltage);
   if(load)//load both DACs if necessary
   {
     digitalWrite(ldac0, LOW);
     digitalWrite(ldac1, LOW);
     digitalWrite(ldac0, HIGH);
-    digitalWrite(ldac1, HIGH);  
-  }  
+    digitalWrite(ldac1, HIGH);
+  }
   digitalWrite(data, LOW);
   return actualvoltage;
 }
@@ -469,20 +469,20 @@ void rampRead(byte DB, byte b1, byte b2, byte * o1, byte * o2, int count, int nR
     case 0:
     readingRampAvg(0, b1 , b2, o1, o2,count,nReadings);
     break;
-    
+
     case 1:
     readingRampAvg(1, b1 , b2, o1, o2,count,nReadings);
     break;
-    
+
     case 2:
     readingRampAvg(2, b1 , b2, o1, o2,count,nReadings);
     break;
-    
+
     case 3:
     readingRampAvg(3, b1 , b2, o1, o2,count,nReadings);
     break;
-  
-    default:  
+
+    default:
     break;
   }
 }
@@ -638,7 +638,7 @@ void adc_zero_scale_cal(int ch)
 {
   SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
   SPI.transfer(adc, ADC_MODE_IDLE);       // Enter idle mode
-  
+
   SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
   SPI.transfer(adc, ADC_MODE_SELFZEROCAL);       // Enter system zero-scale cal mode
   waitDRDY();
@@ -650,6 +650,35 @@ void debug()
   delay(3000);
   digitalWrite(data,LOW);
   delay(3000);
+}
+
+void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
+{
+  if(DB.size() != 4)
+  {
+    SerialUSB.println("SYNTAX ERROR");
+    return;
+  }
+  float channel = DB[1].toInt();
+  float setpoint = DB[2].toFloat();
+  float ramprate = DB[3].toFloat();
+
+  float initial = getDAC(channel);
+  if (abs(setpoint-initial) < 0.05)  //If already at setpoint
+  {
+    return;
+  }
+  // TODO: calc ramprate, make vector string, pass to autoRamp1
+  int nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
+
+  vector<string> autoRampInput;
+  autoRampInput.push_back("RAMP1");
+  autoRampInput.push_back(to_string(channel));
+  autoRampInput.push_back(to_string(initial));
+  autoRampInput.push_back(to_string(setpoint));
+  autoRampInput.push_back(to_string(nSteps));
+  autoRampInput.push_back(to_string("1000")); //1000us delay between steps
+  autoRamp1(autoRampInput)
 }
 
 void router(std::vector<String> DB)
@@ -671,7 +700,7 @@ void router(std::vector<String> DB)
     intRamp(DB);
     SerialUSB.println("RAMP_FINISHED");
     break;
-    
+
     case 2: //SET
     if(DB[2].toFloat() < -1*DAC_FULL_SCALE || DB[2].toFloat() > DAC_FULL_SCALE)
     {
@@ -685,120 +714,126 @@ void router(std::vector<String> DB)
     SerialUSB.print(v,4);
     SerialUSB.println("V");
     break;
-    
+
     case 3: //GET_DAC
     SerialUSB.println(getDAC(DB[1].toInt()), 4);
     break;
-    
+
     case 4: //GET_ADC
     v=readADC(DB[1].toInt());
     SerialUSB.println(v,4);
     break;
 
-    case 5: //RAMP1
+    case 5: //RAMP_SMART
+    ramp_smart(DB);
+    SerialUSB.println("RAMP_FINISHED");
+    break;
+
+    case 6: //RAMP1
     autoRamp1(DB);
     SerialUSB.println("RAMP_FINISHED");
     break;
 
-    case 6: //RAMP2
+    case 7: //RAMP2
     autoRamp2(DB);
     SerialUSB.println("RAMP_FINISHED");
     break;
-    
-    case 7: //BUFFER_RAMP
+
+    case 8: //BUFFER_RAMP
     bufferRamp(DB);
     SerialUSB.println("BUFFER_RAMP_FINISHED");
     break;
 
-    case 8: //CAL_ADC_WITH_DAC
+    case 9: //CAL_ADC_WITH_DAC
     calADCwithDAC();
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 9: //RESET
+    case 10: //RESET
     resetADC();
     break;
-    
-    case 10: //TALK
+
+    case 11: //TALK
     talkADC(DB);
     break;
-    
-    case 11: //CONVERT_TIME
+
+    case 12: //CONVERT_TIME
     writeADCConversionTime(DB);
     break;
 
-    case 12: //*IDN?
+    case 13: //*IDN?
     ID();
     break;
 
-    case 13: //*RDY?
+    case 14: //*RDY?
     RDY();
     break;
 
-    case 14: //GET_DUNIT
+    case 15: //GET_DUNIT
     SerialUSB.println(delayUnit);
     break;
 
-    case 15: //SET_DUNIT
+    case 16: //SET_DUNIT
     setUnit(DB[1].toInt()); // 0 = microseconds 1 = miliseconds
     break;
 
-    case 16: //ADC_ZERO_SC_CAL
+    case 17: //ADC_ZERO_SC_CAL
     adc_zero_scale_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 17: //ADC_CH_ZERO_SC_CAL
+    case 18: //ADC_CH_ZERO_SC_CAL
     adc_ch_zero_scale_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 18: //ADC_CH_FULL_SC_CAL
+    case 19: //ADC_CH_FULL_SC_CAL
     adc_ch_full_scale_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 19: //DAC_CH_CAL
+    case 20: //DAC_CH_CAL
     dac_ch_reset_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_RESET");
     break;
 
-    case 20: //FULL_SCALE
+    case 21: //FULL_SCALE
     DAC_FULL_SCALE = DB[1].toFloat();
     SerialUSB.println("FULL_SCALE_UPDATED");
     break;
 
-    case 21: //DAC_OFFSET_ADJ
+    case 22: //DAC_OFFSET_ADJ
     calDACoffset(DB[1].toInt(), DB[2].toFloat());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
-    
-    case 22: //DAC_GAIN_ADJ
+
+    case 23: //DAC_GAIN_ADJ
     calDACgain(DB[1].toInt(), DB[2].toFloat());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
-    
-    case 23: //WRITE_ADC_CAL
+
+    case 24: //WRITE_ADC_CAL
     writeADCcal(DB[1].toInt(), DB[2].toInt(), DB[3].toInt());
     SerialUSB.println("CALIBRATION_CHANGED");
-    break; 
+    break;
 
-    case 24: //READ_ADC_CAL
+    case 25: //READ_ADC_CAL
     readADCzerocal(DB[1].toInt());
     readADCfullcal(DB[1].toInt());
     SerialUSB.println("READ_FINISHED");
-    break;       
-    
+    break;
+
+
     default:
     break;
   }
 }
 
-void loop() 
+void loop()
 {
   SerialUSB.flush();
   std::vector<String> comm;
-  
+
   if(SerialUSB.available())
   {
     comm = query_serial();
@@ -808,22 +843,22 @@ void loop()
 
 
 void DACintegersend(byte ch, int16_t value)
-{  
+{
   if(ch <= 3)
   {
-    g_DACsetpoint[ch] = value;  
-    SPI.transfer(dac0, DAC_DATA | ch, SPI_CONTINUE); // Indicates to DAC to write channel 'ch' in the data register 
+    g_DACsetpoint[ch] = value;
+    SPI.transfer(dac0, DAC_DATA | ch, SPI_CONTINUE); // Indicates to DAC to write channel 'ch' in the data register
     SPI.transfer(dac0, (uint8_t)(value >> 8), SPI_CONTINUE);   // writes first byte
     SPI.transfer(dac0, (uint8_t)(value & 0xff));                // writes second byte
   }
   else if(ch < NUMDACCHANNELS)
   {
-    g_DACsetpoint[ch] = value; 
+    g_DACsetpoint[ch] = value;
     ch -= 4;
-    SPI.transfer(dac1, DAC_DATA | ch, SPI_CONTINUE); // Indicates to DAC to write channel 'ch' in the data register 
+    SPI.transfer(dac1, DAC_DATA | ch, SPI_CONTINUE); // Indicates to DAC to write channel 'ch' in the data register
     SPI.transfer(dac1, (uint8_t)(value >> 8), SPI_CONTINUE);   // writes first byte
     SPI.transfer(dac1, (uint8_t)(value & 0xff));                // writes second byte
-  }  
+  }
 }
 
 void intRamp(std::vector<String> DB)
@@ -836,7 +871,7 @@ void intRamp(std::vector<String> DB)
   g_numrampADCchannels = channelsADC.length();
   float v_min = -1 * DAC_FULL_SCALE;
   float v_max = DAC_FULL_SCALE;
-  
+
   g_done = false;
   g_samplecount = 0;
   //Do some bounds checking
@@ -855,29 +890,29 @@ void intRamp(std::vector<String> DB)
     g_DACendpoint[i] = voltageToInt32(DB[i+3+g_numrampDACchannels].toFloat());
     g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31)) / g_numsteps;
     DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set DACs to initial point
-    
+
     #ifdef DEBUGRAMP
     SerialUSB.print("DAC ch ");
-    SerialUSB.print(g_DACchanselect[i]);    
-    SerialUSB.print(" Startpoint: ");    
+    SerialUSB.print(g_DACchanselect[i]);
+    SerialUSB.print(" Startpoint: ");
     SerialUSB.print(g_DACstartpoint[i]);
     SerialUSB.print(" Ramppoint: ");
-    SerialUSB.print((int32_t)(g_DACramppoint[i] / BIT31)); 
-    SerialUSB.print(", Finalpoint: ");       
-    SerialUSB.print(g_DACendpoint[i]); 
+    SerialUSB.print((int32_t)(g_DACramppoint[i] / BIT31));
+    SerialUSB.print(", Finalpoint: ");
+    SerialUSB.print(g_DACendpoint[i]);
     SerialUSB.print(", Stepsize: ");
-    SerialUSB.println((int32_t)(g_DACstep[i] / BIT31)); 
-    #endif    
+    SerialUSB.println((int32_t)(g_DACstep[i] / BIT31));
+    #endif
   }
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
   ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
   ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
 
-/*  
+/*
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   //SPI.transfer(adc, ADC_IO_RDYFN); //Change RDY to only trigger when all channels complete
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete and test SYNC
-*/    
+*/
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
   {
     g_ADCchanselect[i] = channelsADC[i] - '0';
@@ -885,20 +920,20 @@ void intRamp(std::vector<String> DB)
     SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
     SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
     SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
-    
+
     #ifdef DEBUGRAMP
-    SerialUSB.print("ADC ch: ");    
+    SerialUSB.print("ADC ch: ");
     SerialUSB.print(g_ADCchanselect[i]);
     SerialUSB.println(" selected");
-    #endif        
+    #endif
   }
-  
+
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_RDYFN); //Change RDY to only trigger when all channels complete
   //SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete and test SYNC
 
 
-  
+
   delay(DACSETTLETIME);//Wait for DACs to settle
 
   digitalWrite(data,HIGH);
@@ -915,13 +950,13 @@ void intRamp(std::vector<String> DB)
         break;
       }
     }
-    
+
   }
   detachInterrupt(digitalPinToInterrupt(drdy));
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_DEFAULT); //Change RDY to trigger when any channel complete
   for(i = 0; i < NUMADCCHANNELS; i++)
-  { 
+  {
   SPI.transfer(adc, ADC_CHSETUP | i);//Access channel setup register
   SPI.transfer(adc, ADC_CHSETUP_RNG10BI);//set +/-10V range and disable for continuous mode
   SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
@@ -934,10 +969,10 @@ void updatead()
 {
    int16_t i, temp;
    if(!g_done)
-   {      
+   {
       ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
       ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-      
+
       for(i = 0; i < g_numrampADCchannels; i++)
       {
          SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
@@ -945,52 +980,52 @@ void updatead()
          g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
          g_buffindex += 2;
       }
-      
+
       if(g_samplecount < 1)//first loop has to be discarded, so just overwrite buffer
       {
         g_buffindex = 0;
 
       }
       g_samplecount++;
-                        
+
       if (g_buffindex >= USBBUFFSIZE)
       {
         SerialUSB.write((char*)g_USBbuff, g_buffindex);
-        g_buffindex = 0;        
+        g_buffindex = 0;
       }
-      
+
       if(g_samplecount > g_numsteps)
       {
         if(g_buffindex > 0)
         {
           SerialUSB.write((char*)g_USBbuff, g_buffindex);
-          g_buffindex = 0;  
-        }        
+          g_buffindex = 0;
+        }
         g_done = true;
       }
       else
       {
-      //get next DAC step ready if this isn't the last sample               
+      //get next DAC step ready if this isn't the last sample
         for(i = 0; i < g_numrampDACchannels; i++)
         {
-          g_DACramppoint[i] += g_DACstep[i];         
+          g_DACramppoint[i] += g_DACstep[i];
           DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));
         }
       }
    }
-}   
+}
 
 
 void adc_ch_zero_scale_cal(int ch)
 {
-  
+
   SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
   SPI.transfer(adc, ADC_MODE_IDLE);       // Enter idle mode
-  
+
   SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
   SPI.transfer(adc, ADC_MODE_SYSZEROCAL);       // Enter system zero-scale cal mode
   waitDRDY();
-  readADCzerocal(ch); 
+  readADCzerocal(ch);
 }
 
 
@@ -1002,14 +1037,14 @@ void readADCzerocal(byte ch)
   b1 = SPI.transfer(adc,0x00);   // read byte 1
   b2 = SPI.transfer(adc,0x00);   // read byte 2
   b3 = SPI.transfer(adc,0x00);   // read byte 3
-  
+
   calvalue += b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
   SerialUSB.print("ADC Channel ");
   SerialUSB.print(ch);
   SerialUSB.print(" zero-scale cal register: ");
-  SerialUSB.println(calvalue);  
+  SerialUSB.println(calvalue);
 }
 
 
@@ -1024,8 +1059,8 @@ void adc_ch_full_scale_cal(int ch)
   waitDRDY();
 
   readADCfullcal(ch);
-  
-   
+
+
 }
 
 void readADCfullcal(byte ch)
@@ -1036,11 +1071,11 @@ void readADCfullcal(byte ch)
   b1 = SPI.transfer(adc,0x00);   // read byte 1
   b2 = SPI.transfer(adc,0x00);   // read byte 2
   b3 = SPI.transfer(adc,0x00);   // read byte 3
-  
+
   calvalue += b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
-  
+
   SerialUSB.print("ADC Channel ");
   SerialUSB.print(ch);
   SerialUSB.print(" full-scale cal register: ");
@@ -1058,17 +1093,17 @@ void calDACoffset(byte ch, float offset)
 {
   int8_t numsteps;
   float stepsize = (10.0 * 2.0) / (65535.0 * 8.0); //stepsize is 1/8 of a 16-bit LSB
-  
+
   if(offset < 0)
   {
     numsteps = (int8_t)((offset / stepsize) - 0.5) * -1;
   }
   else
   {
-    numsteps = (int8_t)((offset / stepsize) + 0.5) * -1;  
+    numsteps = (int8_t)((offset / stepsize) + 0.5) * -1;
   }
-  
-  
+
+
   SerialUSB.print("Offset stepsize is: ");
   SerialUSB.print(stepsize * 1000000);
   SerialUSB.println("uV");
@@ -1076,7 +1111,7 @@ void calDACoffset(byte ch, float offset)
   SerialUSB.print(ch);
   SerialUSB.print(" offset register: ");
   SerialUSB.println(numsteps);
-  writeDACoffset(ch, numsteps);  
+  writeDACoffset(ch, numsteps);
 }
 
 void calDACgain(byte ch, float offset) //Offset is measured relative to ideal negative full scale voltage (usually -10V)
@@ -1091,22 +1126,22 @@ void calDACgain(byte ch, float offset) //Offset is measured relative to ideal ne
   }
   else
   {
-    numsteps = (int8_t)((offset / stepsize) + 0.5);  
+    numsteps = (int8_t)((offset / stepsize) + 0.5);
   }
-  
+
   SerialUSB.print("Negative full-scale gain stepsize is: ");
   SerialUSB.print(stepsize * 1000000);
   SerialUSB.println("uV");
   SerialUSB.print("DAC Channel ");
   SerialUSB.print(ch);
   SerialUSB.print(" gain register: ");
-  SerialUSB.println(numsteps);  
+  SerialUSB.println(numsteps);
   writeDACgain(ch, numsteps);
 }
 
 void dac_ch_reset_cal(byte ch)
 {
-  writeDACoffset(ch, 0);  
+  writeDACoffset(ch, 0);
   writeDACgain(ch, 0);
 }
 
@@ -1114,30 +1149,30 @@ void writeDACoffset(int ch, int8_t steps)
 {
   int thisdac;
   int thisldac;
-  
+
   convertDACch(&ch, &thisdac, &thisldac);
-  
-  SPI.transfer(thisdac, DAC_OFFSET | ch,SPI_CONTINUE); // Write DAC channel offset register 
+
+  SPI.transfer(thisdac, DAC_OFFSET | ch,SPI_CONTINUE); // Write DAC channel offset register
   SPI.transfer(thisdac, 0x00,SPI_CONTINUE);   // writes first byte
   SPI.transfer(thisdac, steps);
-  digitalWrite(thisldac, LOW);  
+  digitalWrite(thisldac, LOW);
   digitalWrite(thisldac, HIGH);
-  
+
 }
 
 void writeDACgain(int ch, int8_t steps)
 {
   int thisdac;
   int thisldac;
-  
+
   convertDACch(&ch, &thisdac, &thisldac);
-  
-  SPI.transfer(thisdac, DAC_FINEGAIN  | ch,SPI_CONTINUE); // Write DAC channel fine gain register 
+
+  SPI.transfer(thisdac, DAC_FINEGAIN  | ch,SPI_CONTINUE); // Write DAC channel fine gain register
   SPI.transfer(thisdac, 0x00,SPI_CONTINUE);   // writes first byte
   SPI.transfer(thisdac, steps);
-  digitalWrite(thisldac, LOW);  
+  digitalWrite(thisldac, LOW);
   digitalWrite(thisldac, HIGH);
-  
+
 }
 void writeADCchzeroscale(byte ch, int32_t zeroscale)
 {
@@ -1152,7 +1187,7 @@ void writeADCchfullscale(byte ch, int32_t fullscale)
   SPI.transfer(adc, ADC_CHFULLSCALECAL | ch, SPI_CONTINUE); //Write channel zero scale register
   SPI.transfer(adc, (fullscale & 0xFF0000) >> 16, SPI_CONTINUE); // Write first byte
   SPI.transfer(adc, (fullscale & 0xFF00) >> 8, SPI_CONTINUE); // Write second byte
-  SPI.transfer(adc, fullscale & 0xFF); // Write third byte   
+  SPI.transfer(adc, fullscale & 0xFF); // Write third byte
 }
 
 void loaddefaultcals()
@@ -1176,7 +1211,7 @@ void calADCwithDAC()
   SerialUSB.println("Setting DACs to 0VDC...");
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    writeDAC(ch, 0.0, true);    
+    writeDAC(ch, 0.0, true);
   }
   delay(2000);
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
@@ -1187,14 +1222,14 @@ void calADCwithDAC()
   SerialUSB.println("Setting DACs to 10VDC...");
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    writeDAC(ch, 10.0, true);    
+    writeDAC(ch, 10.0, true);
   }
   delay(2000);
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     adc_ch_full_scale_cal(ch);
   }
-  
+
 }
 
 void convertDACch(int *ch, int *spipin, int *ldacpin)
