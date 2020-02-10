@@ -35,8 +35,8 @@ int drdy=48; // Data is ready pin on ADC
 int led = 32;
 int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
 int err=30;
-const int Noperations = 26;
-String operations[Noperations] = {"NOP", "INT_RAMP", "SET", "GET_DAC", "GET_ADC", "RAMP_SMART", "RAMP1", "RAMP2", "BUFFER_RAMP", "CAL_ADC_WITH_DAC", "RESET", "TALK", "CONVERT_TIME", "*IDN?", "*RDY?", "GET_DUNIT","SET_DUNIT", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "DAC_RESET_CAL", "FULL_SCALE", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "WRITE_ADC_CAL", "READ_ADC_CAL"};
+const int Noperations = 27;
+String operations[Noperations] = {"NOP", "INT_RAMP", "SET", "GET_DAC", "GET_ADC", "RAMP_SMART", "RAMP1", "RAMP2", "BUFFER_RAMP", "CAL_ADC_WITH_DAC", "RESET", "TALK", "CONVERT_TIME", "READ_CONVERT_TIME", "*IDN?", "*RDY?", "GET_DUNIT","SET_DUNIT", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "DAC_RESET_CAL", "FULL_SCALE", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "WRITE_ADC_CAL", "READ_ADC_CAL"};
 int delayUnit=0; // 0=microseconds 1=miliseconds
 
 float DAC_FULL_SCALE = 10.0;
@@ -196,6 +196,28 @@ void talkADC(std::vector<String> DB)
   comm=SPI.transfer(adc,DB[1].toInt());
   SerialUSB.println(comm);
   SerialUSB.flush();
+}
+
+void readADCConversionTime(std::vector<String> DB)
+{
+  if(DB.size() != 2)
+  {
+    SerialUSB.println("SYNTAX ERROR");
+    return;
+  }
+  int adcChannel;
+  adcChannel = DB[1].toInt();
+  if (adcChannel < 0 || adcChannel > 3)
+  {
+    SerialUSB.println("ADC channel must be between 0 - 3");
+    return;
+  }
+  byte cr;
+  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | adcChannel); //Read conversion time register
+  cr=SPI.transfer(adc,0); //Read back the CT register
+  //SerialUSB.println(fw);
+  int convtime = ((int)(((cr&127)*128+249)/6.144)+0.5);
+  SerialUSB.println(convtime);
 }
 
 void writeADCConversionTime(std::vector<String> DB)
@@ -763,63 +785,67 @@ void router(std::vector<String> DB)
     writeADCConversionTime(DB);
     break;
 
-    case 13: //*IDN?
+    case 13: //READ_CONVERT_TIME
+    readADCConversionTime(DB);
+    break;
+
+    case 14: //*IDN?
     ID();
     break;
 
-    case 14: //*RDY?
+    case 15: //*RDY?
     RDY();
     break;
 
-    case 15: //GET_DUNIT
+    case 16: //GET_DUNIT
     SerialUSB.println(delayUnit);
     break;
 
-    case 16: //SET_DUNIT
+    case 17: //SET_DUNIT
     setUnit(DB[1].toInt()); // 0 = microseconds 1 = miliseconds
     break;
 
-    case 17: //ADC_ZERO_SC_CAL
+    case 18: //ADC_ZERO_SC_CAL
     adc_zero_scale_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 18: //ADC_CH_ZERO_SC_CAL
+    case 19: //ADC_CH_ZERO_SC_CAL
     adc_ch_zero_scale_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 19: //ADC_CH_FULL_SC_CAL
+    case 20: //ADC_CH_FULL_SC_CAL
     adc_ch_full_scale_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 20: //DAC_CH_CAL
+    case 21: //DAC_CH_CAL
     dac_ch_reset_cal(DB[1].toInt());
     SerialUSB.println("CALIBRATION_RESET");
     break;
 
-    case 21: //FULL_SCALE
+    case 22: //FULL_SCALE
     DAC_FULL_SCALE = DB[1].toFloat();
     SerialUSB.println("FULL_SCALE_UPDATED");
     break;
 
-    case 22: //DAC_OFFSET_ADJ
+    case 23: //DAC_OFFSET_ADJ
     calDACoffset(DB[1].toInt(), DB[2].toFloat());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 23: //DAC_GAIN_ADJ
+    case 24: //DAC_GAIN_ADJ
     calDACgain(DB[1].toInt(), DB[2].toFloat());
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
-    case 24: //WRITE_ADC_CAL
+    case 25: //WRITE_ADC_CAL
     writeADCcal(DB[1].toInt(), DB[2].toInt(), DB[3].toInt());
     SerialUSB.println("CALIBRATION_CHANGED");
     break;
 
-    case 25: //READ_ADC_CAL
+    case 26: //READ_ADC_CAL
     readADCzerocal(DB[1].toInt());
     readADCfullcal(DB[1].toInt());
     SerialUSB.println("READ_FINISHED");
