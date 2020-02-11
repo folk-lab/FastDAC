@@ -11,9 +11,9 @@
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 
-#define USBBUFFSIZE 300//most efficient for USB bandwidth is 1kB(1024) but can cause long delays between sends when using longer sample times
+#define USBBUFFSIZE 512//most efficient for USB bandwidth is 1kB(1024) but can cause long delays between sends when using longer sample times
 
-#define DACSETTLETIME  200//milliseconds to wait before starting ramp
+#define DACSETTLETIME  100//milliseconds to wait before starting ramp
 
 //#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
 
@@ -586,8 +586,8 @@ void autoRamp1(std::vector<String> DB)
     return;
   }
 
-  float v1 = DB[2].toFloat();
-  float v2 = DB[3].toFloat();
+  float v1 = DB[2].toFloat()/1000; // mV to V
+  float v2 = DB[3].toFloat()/1000; // mV to V
   int nSteps = DB[4].toInt();
   int dacChannel=DB[1].toInt();
 
@@ -595,7 +595,7 @@ void autoRamp1(std::vector<String> DB)
   {
     int timer = micros();
     digitalWrite(data,HIGH);
-    writeDAC(dacChannel, v1+(v2-v1)*j/(nSteps-1), true);
+    writeDAC(dacChannel, v1+(v2-v1)*j/(nSteps-1), true); // takes V
     digitalWrite(data,LOW);
     while(micros() <= timer + DB[5].toInt());
   }
@@ -687,18 +687,21 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   float ramprate = DB[3].toFloat();
   float initial = getDAC(channel)*1000;  //From V to mV
 
-  if (abs(setpoint-initial) < 0.05)  //If already at setpoint
+  if (abs(setpoint-initial) < 0.0001)  //If already at setpoint
   {
     return;
   }
   // TODO: calc ramprate, make vector string, pass to autoRamp1
   int nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
-
+  if (nSteps < 5)
+  {
+    nSteps = 5;
+  }
   std::vector<String> autoRampInput;
   autoRampInput.push_back("RAMP1");
   autoRampInput.push_back(String(channel));
-  autoRampInput.push_back(String(initial/1000));  //from mV to V
-  autoRampInput.push_back(String(setpoint/1000)); //from mV to V
+  autoRampInput.push_back(String(initial)); 
+  autoRampInput.push_back(String(setpoint)); 
   autoRampInput.push_back(String(nSteps));
   autoRampInput.push_back("1000"); //1000us delay between steps
   autoRamp1(autoRampInput);
@@ -1006,6 +1009,8 @@ void updatead()
          SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
          g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
          g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
+//         g_USBbuff[g_buffindex] = (g_samplecount + 32767) >> 8;  //debugging: For sending back incrementing numbers 
+//         g_USBbuff[g_buffindex + 1] = (g_samplecount + 32767) & 0xFF;
          g_buffindex += 2;
       }
 
