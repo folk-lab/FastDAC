@@ -912,10 +912,10 @@ void intRamp(std::vector<String> DB)
   for(i = 0; i < g_numrampDACchannels; i++)
   {
     g_DACchanselect[i] = channelsDAC[i] - '0';
-    g_DACstartpoint[i] = voltageToInt32(DB[i+3].toFloat());
+    g_DACstartpoint[i] = voltageToInt32(DB[i+3].toFloat()/1000);
     //g_DACramppoint[i] = g_DACstartpoint[i];
     g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
-    g_DACendpoint[i] = voltageToInt32(DB[i+3+g_numrampDACchannels].toFloat());
+    g_DACendpoint[i] = voltageToInt32(DB[i+3+g_numrampDACchannels].toFloat()/1000);
     g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31)) / g_numsteps;
     DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set DACs to initial point
 
