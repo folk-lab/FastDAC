@@ -11,9 +11,9 @@
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 
-#define USBBUFFSIZE 512//most efficient for USB bandwidth is 1kB(1024) but can cause long delays between sends when using longer sample times
+#define USBBUFFSIZE 300// works up to 450, but at some value higher than that the behaviour is to wait and send >2000 byte packets. Don't know why.
 
-#define DACSETTLETIME  100//milliseconds to wait before starting ramp
+#define DACSETTLETIME  1//milliseconds to wait before starting ramp
 
 //#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
 
