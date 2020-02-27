@@ -700,8 +700,8 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   std::vector<String> autoRampInput;
   autoRampInput.push_back("RAMP1");
   autoRampInput.push_back(String(channel));
-  autoRampInput.push_back(String(initial)); 
-  autoRampInput.push_back(String(setpoint)); 
+  autoRampInput.push_back(String(initial));
+  autoRampInput.push_back(String(setpoint));
   autoRampInput.push_back(String(nSteps));
   autoRampInput.push_back("1000"); //1000us delay between steps
   autoRamp1(autoRampInput);
@@ -711,6 +711,7 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
 void router(std::vector<String> DB)
 {
   float v;
+  String buffer;
   int operation = indexOfOperation(DB[0]);
   switch ( operation )
   {
@@ -814,12 +815,14 @@ void router(std::vector<String> DB)
     break;
 
     case 19: //ADC_CH_ZERO_SC_CAL
-    adc_ch_zero_scale_cal(DB[1].toInt());
+    buffer = adc_ch_zero_scale_cal(DB[1].toInt());
+    SerialUSB.println(buffer);
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
     case 20: //ADC_CH_FULL_SC_CAL
-    adc_ch_full_scale_cal(DB[1].toInt());
+    buffer = adc_ch_full_scale_cal(DB[1].toInt());
+    SerialUSB.println(buffer);
     SerialUSB.println("CALIBRATION_FINISHED");
     break;
 
@@ -849,8 +852,9 @@ void router(std::vector<String> DB)
     break;
 
     case 26: //READ_ADC_CAL
-    readADCzerocal(DB[1].toInt());
-    readADCfullcal(DB[1].toInt());
+    buffer = readADCzerocal(DB[1].toInt());
+    buffer += readADCfullcal(DB[1].toInt());
+    SerialUSB.println(buffer);
     SerialUSB.println("READ_FINISHED");
     break;
 
@@ -1009,7 +1013,7 @@ void updatead()
          SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
          g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
          g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
-//         g_USBbuff[g_buffindex] = (g_samplecount + 32767) >> 8;  //debugging: For sending back incrementing numbers 
+//         g_USBbuff[g_buffindex] = (g_samplecount + 32767) >> 8;  //debugging: For sending back incrementing numbers
 //         g_USBbuff[g_buffindex + 1] = (g_samplecount + 32767) & 0xFF;
          g_buffindex += 2;
       }
@@ -1049,7 +1053,7 @@ void updatead()
 }
 
 
-void adc_ch_zero_scale_cal(int ch)
+String adc_ch_zero_scale_cal(int ch)
 {
 
   SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
@@ -1058,14 +1062,17 @@ void adc_ch_zero_scale_cal(int ch)
   SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
   SPI.transfer(adc, ADC_MODE_SYSZEROCAL);       // Enter system zero-scale cal mode
   waitDRDY();
-  readADCzerocal(ch);
+  return readADCzerocal(ch);
 }
 
 
-void readADCzerocal(byte ch)
+String readADCzerocal(byte ch)
 {
   byte b1, b2, b3;
   uint32_t calvalue;
+  int n;
+  String buffer;
+  char buffertemp [100];
   SPI.transfer(adc, ADC_CHZEROSCALECAL | ADC_REGREAD | ch);   // Access ch zero-scale cal register in read mode
   b1 = SPI.transfer(adc,0x00);   // read byte 1
   b2 = SPI.transfer(adc,0x00);   // read byte 2
@@ -1074,14 +1081,18 @@ void readADCzerocal(byte ch)
   calvalue += b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
-  SerialUSB.print("ADC Channel ");
-  SerialUSB.print(ch);
-  SerialUSB.print(" zero-scale cal register: ");
-  SerialUSB.println(calvalue);
+
+  n = snprintf(buffertemp,100,"ch%d,%d",ch,calvalue);
+  buffer = buffertemp;
+  //SerialUSB.print("ADC Channel ");
+  //SerialUSB.print(ch);
+  //SerialUSB.print(" zero-scale cal register: ");
+  //SerialUSB.println(calvalue);
+  return buffer;
 }
 
 
-void adc_ch_full_scale_cal(int ch)
+String adc_ch_full_scale_cal(int ch)
 {
   //Put ch in idle mode
   SPI.transfer(adc, ADC_CHMODE | ch); // Access ch mode register in write mode
@@ -1091,15 +1102,17 @@ void adc_ch_full_scale_cal(int ch)
   SPI.transfer(adc, ADC_MODE_SYSFULLCAL); // Enter system full-scale cal mode
   waitDRDY();
 
-  readADCfullcal(ch);
-
-
+  return readADCfullcal(ch);
 }
 
-void readADCfullcal(byte ch)
+String readADCfullcal(byte ch)
 {
   byte b1, b2, b3;
   uint32_t calvalue;
+  int n;
+  String buffer;
+  char buffertemp [100];
+
   SPI.transfer(adc, ADC_CHFULLSCALECAL | ADC_REGREAD | ch);   // Access ch full-scale cal register in read mode
   b1 = SPI.transfer(adc,0x00);   // read byte 1
   b2 = SPI.transfer(adc,0x00);   // read byte 2
@@ -1109,10 +1122,14 @@ void readADCfullcal(byte ch)
   calvalue += b2 << 8;
   calvalue += b3;
 
-  SerialUSB.print("ADC Channel ");
-  SerialUSB.print(ch);
-  SerialUSB.print(" full-scale cal register: ");
-  SerialUSB.println(calvalue);
+  n = snprintf(buffertemp,100,"ch%d,%d",ch,calvalue);
+  buffer = buffertemp;
+  //SerialUSB.print("ADC Channel ");
+  //SerialUSB.print(ch);
+  //SerialUSB.print(" full-scale cal register: ");
+  //SerialUSB.println(calvalue);
+
+  return buffer;
 }
 
 void writeADCcal(byte ch, uint32_t zerocal, uint32_t fullcal)
@@ -1125,6 +1142,9 @@ void writeADCcal(byte ch, uint32_t zerocal, uint32_t fullcal)
 void calDACoffset(byte ch, float offset)
 {
   int8_t numsteps;
+  int n;
+  String buffer;
+  char buffertemp [100];
   float stepsize = (10.0 * 2.0) / (65535.0 * 8.0); //stepsize is 1/8 of a 16-bit LSB
 
   if(offset < 0)
@@ -1136,20 +1156,24 @@ void calDACoffset(byte ch, float offset)
     numsteps = (int8_t)((offset / stepsize) + 0.5) * -1;
   }
 
-
-  SerialUSB.print("Offset stepsize is: ");
-  SerialUSB.print(stepsize * 1000000);
-  SerialUSB.println("uV");
-  SerialUSB.print("DAC Channel ");
-  SerialUSB.print(ch);
-  SerialUSB.print(" offset register: ");
-  SerialUSB.println(numsteps);
+  n = snprintf(buffertemp,100,"ch%d,%f,%d",ch,stepsize*1000000,numsteps);
+  buffer = buffertemp;
+  //SerialUSB.print("Offset stepsize is: ");
+  //SerialUSB.print(stepsize * 1000000);
+  //SerialUSB.println("uV");
+  //SerialUSB.print("DAC Channel ");
+  //SerialUSB.print(ch);
+  //SerialUSB.print(" offset register: ");
+  SerialUSB.println(buffer);
   writeDACoffset(ch, numsteps);
 }
 
 void calDACgain(byte ch, float offset) //Offset is measured relative to ideal negative full scale voltage (usually -10V)
 {
   int8_t numsteps;
+  int n;
+  String buffer;
+  char buffertemp [100];
   float stepsize = (10.0 * 2.0) / (65535.0 * 2.0); //stepsize is 1/2 of a 16-bit LSB
   numsteps = (int8_t)(offset / stepsize);
 
@@ -1162,13 +1186,15 @@ void calDACgain(byte ch, float offset) //Offset is measured relative to ideal ne
     numsteps = (int8_t)((offset / stepsize) + 0.5);
   }
 
-  SerialUSB.print("Negative full-scale gain stepsize is: ");
-  SerialUSB.print(stepsize * 1000000);
-  SerialUSB.println("uV");
-  SerialUSB.print("DAC Channel ");
-  SerialUSB.print(ch);
-  SerialUSB.print(" gain register: ");
-  SerialUSB.println(numsteps);
+  n = snprintf(buffertemp,100,"%f,%d",stepsize*1000000,numsteps);
+  buffer = buffertemp;
+  //SerialUSB.print("Negative full-scale gain stepsize is: ");
+  //SerialUSB.print(stepsize * 1000000);
+  //SerialUSB.println("uV");
+  //SerialUSB.print("DAC Channel ");
+  //SerialUSB.print(ch);
+  //SerialUSB.print(" gain register: ");
+  SerialUSB.println(buffer);
   writeDACgain(ch, numsteps);
 }
 
@@ -1207,6 +1233,7 @@ void writeDACgain(int ch, int8_t steps)
   digitalWrite(thisldac, HIGH);
 
 }
+
 void writeADCchzeroscale(byte ch, int32_t zeroscale)
 {
   SPI.transfer(adc, ADC_CHZEROSCALECAL | ch, SPI_CONTINUE); //Write channel zero scale register
@@ -1241,28 +1268,32 @@ void loaddefaultcals()
 void calADCwithDAC()
 {
   byte ch = 0;
-  SerialUSB.println("Setting DACs to 0VDC...");
+  String buffer;
+  //SerialUSB.println("Setting DACs to 0VDC...");
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     writeDAC(ch, 0.0, true);
   }
-  delay(2000);
+  delay(200); // wait 200 ms
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    adc_ch_zero_scale_cal(ch);
+    buffer += adc_ch_zero_scale_cal(ch);
+    buffer += ",";
   }
 
-  SerialUSB.println("Setting DACs to 10VDC...");
+  //SerialUSB.println("Setting DACs to 10VDC...");
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     writeDAC(ch, 10.0, true);
   }
-  delay(2000);
+  delay(200);
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    adc_ch_full_scale_cal(ch);
+    buffer += adc_ch_full_scale_cal(ch);
+    buffer += ",";
   }
 
+  SerialUSB.println(buffer);
 }
 
 void convertDACch(int *ch, int *spipin, int *ldacpin)
