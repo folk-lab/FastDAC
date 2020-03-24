@@ -35,8 +35,8 @@ int drdy=48; // Data is ready pin on ADC
 int led = 32;
 int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
 int err=30;
-const int Noperations = 27;
-String operations[Noperations] = {"NOP", "INT_RAMP", "SET", "GET_DAC", "GET_ADC", "RAMP_SMART", "RAMP1", "RAMP2", "BUFFER_RAMP", "CAL_ADC_WITH_DAC", "RESET", "TALK", "CONVERT_TIME", "READ_CONVERT_TIME", "*IDN?", "*RDY?", "GET_DUNIT","SET_DUNIT", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "DAC_RESET_CAL", "FULL_SCALE", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "WRITE_ADC_CAL", "READ_ADC_CAL"};
+const int Noperations = 29;
+String operations[Noperations] = {"NOP", "INT_RAMP", "SET", "GET_DAC", "GET_ADC", "RAMP_SMART", "RAMP1", "RAMP2", "BUFFER_RAMP", "CAL_ADC_WITH_DAC", "RESET", "TALK", "CONVERT_TIME", "READ_CONVERT_TIME", "*IDN?", "*RDY?", "GET_DUNIT","SET_DUNIT", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "DAC_RESET_CAL", "FULL_SCALE", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "WRITE_ADC_CAL", "READ_ADC_CAL","DEFAULT_CAL","SPEC_ANA"};
 int delayUnit=0; // 0=microseconds 1=miliseconds
 
 float DAC_FULL_SCALE = 10.0;
@@ -375,7 +375,7 @@ float getSingleReading(int adcchan)
       break;
 
       case 1:
-      return 0.0;
+      return 0.0; // This needs to change to +-10
       break;
     }
   }
@@ -858,6 +858,15 @@ void router(std::vector<String> DB)
     SerialUSB.println("READ_FINISHED");
     break;
 
+    case 27: //DEFAULT_CAL
+    loaddefaultcals(); // set default calibration
+    SerialUSB.println("CALIBRATION_CHANGED");
+    break;
+
+    case 28: //SPEC_ANA
+    spec_ana(DB);
+    SerialUSB.println("READ_FINISHED");
+    break;
 
     default:
     break;
@@ -875,7 +884,6 @@ void loop()
     router(comm);
   }
 }
-
 
 void DACintegersend(byte ch, int16_t value)
 {
@@ -1052,6 +1060,103 @@ void updatead()
    }
 }
 
+void spec_ana(std::vector<String> DB)
+{
+  int i, j;
+  bool error = false;
+  String channelsADC = DB[1];
+  g_numrampADCchannels = channelsADC.length();
+  g_numsteps=DB[2].toInt();
+
+  g_done = false;
+  g_samplecount = 0;
+  // Do some bounds checking
+  if((g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != 3))
+  {
+    SerialUSB.println("Syntax error");
+    return;
+  }
+
+  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
+
+  for(i = 0; i < g_numrampADCchannels; i++) // Configure ADC channels
+  {
+    g_ADCchanselect[i] = channelsADC[i] - '0';
+    SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
+    SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
+    SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
+    SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
+  }
+
+  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_RDYFN); //Change RDY to only trigger when all channels complete
+
+  // ASK MARK!
+  digitalWrite(data,HIGH);
+
+  attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);
+  while(!g_done)
+  {
+    // Look for user interrupt ("STOP")
+    if(SerialUSB.available())
+    {
+      std::vector<String> comm;
+      comm = query_serial();
+      if(comm[0] == "STOP")
+      {
+        break;
+      }
+    }
+  }
+  detachInterrupt(digitalPinToInterrupt(drdy));
+  SPI.transfer(adc, ADC_IO); // Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_DEFAULT); // Change RDY to trigger when any channel complete
+  for(i = 0; i < NUMADCCHANNELS; i++)
+  {
+  SPI.transfer(adc, ADC_CHSETUP | i); // Access channel setup register
+  SPI.transfer(adc, ADC_CHSETUP_RNG10BI); // set +/-10V range and disable for continuous mode
+  SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]); // Access channel mode register
+  SPI.transfer(adc, ADC_MODE_IDLE); // Set ADC to idle
+  }
+  digitalWrite(data,LOW);
+}
+
+void writetobuffer()
+{
+   int16_t i, temp;
+   if(!g_done)
+   {
+      for(i = 0; i < g_numrampADCchannels; i++)
+      {
+         SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); // Read channel data register
+         g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
+         g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
+         g_buffindex += 2;
+      }
+      // Is this necessary?
+      if(g_samplecount < 1) // first loop has to be discarded, so just overwrite buffer
+      {
+        g_buffindex = 0;
+      }
+      g_samplecount++;
+
+      if (g_buffindex >= USBBUFFSIZE)
+      {
+        SerialUSB.write((char*)g_USBbuff, g_buffindex);
+        g_buffindex = 0;
+      }
+
+      if(g_samplecount > g_numsteps)
+      {
+        if(g_buffindex > 0)
+        {
+          SerialUSB.write((char*)g_USBbuff, g_buffindex);
+          g_buffindex = 0;
+        }
+        g_done = true;
+      }
+   }
+}
 
 String adc_ch_zero_scale_cal(int ch)
 {
@@ -1064,7 +1169,6 @@ String adc_ch_zero_scale_cal(int ch)
   waitDRDY();
   return readADCzerocal(ch);
 }
-
 
 String readADCzerocal(byte ch)
 {
@@ -1090,7 +1194,6 @@ String readADCzerocal(byte ch)
   //SerialUSB.println(calvalue);
   return buffer;
 }
-
 
 String adc_ch_full_scale_cal(int ch)
 {
