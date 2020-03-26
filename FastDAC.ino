@@ -343,7 +343,9 @@ int32_t voltageToInt32(float voltage)
 
 float getDAC(int ch)
 {
-  return int16ToVoltage(g_DACsetpoint[ch]);
+  float voltage;
+  voltage = int16ToVoltage(g_DACsetpoint[ch]);
+  return voltage*1000.0; // return mV
 }
 
 float getSingleReading(int adcchan)
@@ -352,63 +354,39 @@ float getSingleReading(int adcchan)
   int statusbyte=0;
   byte o2;
   byte o3;
-  int ovr;
-  if(adcchan <= 3)
+  if(adcchan < NUMADCCHANNELS)
   {
     SPI.transfer(adc, ADC_CHMODE | adcchan);   // Write channel mode register
-    SPI.transfer(adc, ADC_MODE_SINGLECONV | ADC_MODE_DUMP); // Single conversion + dump mode
+    SPI.transfer(adc, ADC_MODE_SINGLECONV | ADC_MODE_DUMP | ADC_MODE_CLAMP); // Single conversion + dump mode + clamp
     waitDRDY();                       // Waits until convertion finishes
     SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | adcchan, SPI_CONTINUE);   // Read channel data register
     statusbyte=SPI.transfer(adc, 0, SPI_CONTINUE);   // Reads Channel 'ch' status
     o2=SPI.transfer(adc, 0, SPI_CONTINUE);           // Reads first byte
     o3=SPI.transfer(adc, 0, SPI_CONTINUE);           // Reads second byte
-    ovr=statusbyte & ADC_CHSTAT_OVR;
-    switch (ovr)
-    {
-      case 0:
-      int decimal;
-      decimal = twoByteToInt(o2,o3);
-      //SerialUSB.println(decimal);
-      float voltage;
-      voltage = map2(decimal, 0, 65536, -10.0, 10.0);
-      return voltage;
-      break;
 
-      case 1:
-      return 0.0; // This needs to change to +-10
-      break;
-    }
+    int decimal;
+    decimal = twoByteToInt(o2,o3);
+    float voltage;
+    voltage = map2(decimal, 0, 65536, -10.0, 10.0);
+    return voltage;
   }
 }
 
 float readADC(byte DB)
 {
   int adcChannel=DB;
-  switch (adcChannel)
-  {
-    case 0:
-    return getSingleReading(0);
-    break;
-    case 1:
-    return getSingleReading(1);
-    break;
-    case 2:
-    return getSingleReading(2);
-    break;
-    case 3:
-    return getSingleReading(3);
-    break;
-
-    default:
-    break;
-  }
+  float voltage;
+  voltage = getSingleReading(adcChannel);
+  return voltage*1000.0; // return mV
 }
 
 float dacDataSend(int ch, float voltage)
 {
   digitalWrite(data, HIGH);
   DACintegersend(ch, voltageToInt16(voltage));
-  return getDAC(ch);
+  float voltreturn;
+  voltreturn = getDAC(ch);
+  return voltreturn/1000.0; // retrun V
 }
 
 float writeDAC(int dacChannel, float voltage, bool load)
@@ -685,7 +663,7 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   float channel = DB[1].toInt();
   float setpoint = DB[2].toFloat();
   float ramprate = DB[3].toFloat();
-  float initial = getDAC(channel)*1000;  //From V to mV
+  float initial = getDAC(channel);  //mV
 
   if (abs(setpoint-initial) < 0.0001)  //If already at setpoint
   {
@@ -1091,7 +1069,6 @@ void spec_ana(std::vector<String> DB)
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_RDYFN); //Change RDY to only trigger when all channels complete
 
-  // ASK MARK!
   digitalWrite(data,HIGH);
 
   attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);
