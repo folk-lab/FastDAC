@@ -45,7 +45,7 @@ int led = 32;
 int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
 int err=30;
 const int Noperations = 22;
-String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", ,"SPEC_ANA", "CONVERT_TIME", "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE"};
+String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE"};
 
 float DAC_FULL_SCALE = 10.0;
 
@@ -119,6 +119,33 @@ void setup()
 ////////////////
 //// ROUTER ////
 ///////////////
+
+std::vector<String> query_serial()
+// read incomming serial commands
+{
+  char received;
+  String inByte = "";
+  std::vector<String> comm;
+  while (received != '\r')
+  {
+    if(SerialUSB.available())
+    {
+      received = SerialUSB.read();
+      if (received == '\n' || received == ' ')
+      {}
+      else if (received == ',' || received == '\r')
+      {
+        comm.push_back(inByte);
+        inByte = "";
+      }
+      else
+      {
+        inByte += received;
+      }
+    }
+  }
+  return comm;
+}
 
 void loop()
 // look for incomming commands
@@ -830,33 +857,6 @@ void convertDACch(int *ch, int *spipin, int *ldacpin)
 
 //// GENERAL ////
 
-std::vector<String> query_serial()
-// read incomming serial commands
-{
-  char received;
-  String inByte = "";
-  std::vector<String> comm;
-  while (received != '\r')
-  {
-    if(SerialUSB.available())
-    {
-      received = SerialUSB.read();
-      if (received == '\n' || received == ' ')
-      {}
-      else if (received == ',' || received == '\r')
-      {
-        comm.push_back(inByte);
-        inByte = "";
-      }
-      else
-      {
-        inByte += received;
-      }
-    }
-  }
-  return comm;
-}
-
 void IDN()
 // return IDN string
 {
@@ -1062,7 +1062,7 @@ float writeDAC(int dacChannel, float voltage, bool load)
   if(dacChannel >= NUMDACCHANNELS)
   {
     SerialUSB.println("SYNTAX ERROR");
-    return;
+    return 0;
   }
   digitalWrite(data, HIGH);
   actualvoltage = dacDataSend(dacChannel, voltage);
