@@ -392,7 +392,7 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   {
     return;
   }
-  // TODO: calc ramprate, make vector string, pass to autoRamp1
+  // Calc ramprate, make vector string, pass to autoRamp1
   int nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
   if (nSteps < 5)
   {
