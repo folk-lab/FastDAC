@@ -30,6 +30,8 @@
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
 
+#define SERIALPORT SerialUSB
+
 int adc=52; //The SPI pin for the ADC
 int dac0 = 4; //The SPI pin for the DAC0
 int dac1 = 10; //The SPI pin for the DAC1
@@ -69,7 +71,7 @@ volatile uint32_t g_numsteps;
 
 void setup()
 {
-  SerialUSB.begin(2000000);
+  SERIALPORT.begin(2000000);
 
   pinMode(ldac0,OUTPUT);
   digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
@@ -128,9 +130,9 @@ std::vector<String> query_serial()
   std::vector<String> comm;
   while (received != '\r')
   {
-    if(SerialUSB.available())
+    if(SERIALPORT.available())
     {
-      received = SerialUSB.read();
+      received = SERIALPORT.read();
       if (received == '\n' || received == ' ')
       {}
       else if (received == ',' || received == '\r')
@@ -150,10 +152,10 @@ std::vector<String> query_serial()
 void loop()
 // look for incomming commands
 {
-  SerialUSB.flush();
+  SERIALPORT.flush();
   std::vector<String> comm;
 
-  if(SerialUSB.available())
+  if(SERIALPORT.available())
   {
     comm = query_serial();
     router(comm);
@@ -168,7 +170,7 @@ void router(std::vector<String> DB)
   switch ( operation )
   {
     case 0: // NOP
-    SerialUSB.println("NOP");
+    SERIALPORT.println("NOP");
     break;
 
     case 1: // *IDN?
@@ -184,27 +186,27 @@ void router(std::vector<String> DB)
     break;
 
     case 4: // GET_DAC
-    SerialUSB.println(getDAC(DB[1].toInt()), 4);
+    SERIALPORT.println(getDAC(DB[1].toInt()), 4);
     break;
 
     case 5: // GET_ADC
     v=readADC(DB[1].toInt());
-    SerialUSB.println(v,4);
+    SERIALPORT.println(v,4);
     break;
 
     case 6: // RAMP_SMART
     ramp_smart(DB);
-    SerialUSB.println("RAMP_FINISHED");
+    SERIALPORT.println("RAMP_FINISHED");
     break;
 
     case 7: // INT_RAMP
     intRamp(DB);
-    SerialUSB.println("RAMP_FINISHED");
+    SERIALPORT.println("RAMP_FINISHED");
     break;
 
     case 8: // SPEC_ANA
     spec_ana(DB);
-    SerialUSB.println("READ_FINISHED");
+    SERIALPORT.println("READ_FINISHED");
     break;
 
     case 9: // CONVERT_TIME
@@ -217,61 +219,61 @@ void router(std::vector<String> DB)
 
     case 11: // CAL_ADC_WITH_DAC
     calADCwithDAC();
-    SerialUSB.println("CALIBRATION_FINISHED");
+    SERIALPORT.println("CALIBRATION_FINISHED");
     break;
 
     case 12: // ADC_ZERO_SC_CAL
     adc_zero_scale_cal(DB[1].toInt());
-    SerialUSB.println("CALIBRATION_FINISHED");
+    SERIALPORT.println("CALIBRATION_FINISHED");
     break;
 
     case 13: // ADC_CH_ZERO_SC_CAL
     buffer = adc_ch_zero_scale_cal(DB[1].toInt());
-    SerialUSB.println(buffer);
-    SerialUSB.println("CALIBRATION_FINISHED");
+    SERIALPORT.println(buffer);
+    SERIALPORT.println("CALIBRATION_FINISHED");
     break;
 
     case 14: // ADC_CH_FULL_SC_CAL
     buffer = adc_ch_full_scale_cal(DB[1].toInt());
-    SerialUSB.println(buffer);
-    SerialUSB.println("CALIBRATION_FINISHED");
+    SERIALPORT.println(buffer);
+    SERIALPORT.println("CALIBRATION_FINISHED");
     break;
 
     case 15: // READ_ADC_CAL
     buffer = readADCzerocal(DB[1].toInt());
     buffer += readADCfullcal(DB[1].toInt());
-    SerialUSB.println(buffer);
-    SerialUSB.println("READ_FINISHED");
+    SERIALPORT.println(buffer);
+    SERIALPORT.println("READ_FINISHED");
     break;
 
     case 16: // WRITE_ADC_CAL
     writeADCcal(DB[1].toInt(), DB[2].toInt(), DB[3].toInt());
-    SerialUSB.println("CALIBRATION_CHANGED");
+    SERIALPORT.println("CALIBRATION_CHANGED");
     break;
 
     case 17: // DAC_OFFSET_ADJ
     calDACoffset(DB[1].toInt(), DB[2].toFloat());
-    SerialUSB.println("CALIBRATION_FINISHED");
+    SERIALPORT.println("CALIBRATION_FINISHED");
     break;
 
     case 18: // DAC_GAIN_ADJ
     calDACgain(DB[1].toInt(), DB[2].toFloat());
-    SerialUSB.println("CALIBRATION_FINISHED");
+    SERIALPORT.println("CALIBRATION_FINISHED");
     break;
 
     case 19: // DAC_RESET_CAL
     dac_ch_reset_cal(DB[1].toInt());
-    SerialUSB.println("CALIBRATION_RESET");
+    SERIALPORT.println("CALIBRATION_RESET");
     break;
 
     case 20: // DEFAULT_CAL
     loaddefaultcals(); // set default calibration
-    SerialUSB.println("CALIBRATION_CHANGED");
+    SERIALPORT.println("CALIBRATION_CHANGED");
     break;
 
     case 21: // FULL_SCALE
     DAC_FULL_SCALE = DB[1].toFloat();
-    SerialUSB.println("FULL_SCALE_UPDATED");
+    SERIALPORT.println("FULL_SCALE_UPDATED");
     break;
 
     default:
@@ -309,22 +311,22 @@ void readADCConversionTime(std::vector<String> DB)
 {
   if(DB.size() != 2)
   {
-    SerialUSB.println("SYNTAX ERROR");
+    SERIALPORT.println("SYNTAX ERROR");
     return;
   }
   int adcChannel;
   adcChannel = DB[1].toInt();
   if (adcChannel < 0 || adcChannel > 3)
   {
-    SerialUSB.println("ADC channel must be between 0 - 3");
+    SERIALPORT.println("ADC channel must be between 0 - 3");
     return;
   }
   byte cr;
   SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | adcChannel); //Read conversion time register
   cr=SPI.transfer(adc,0); //Read back the CT register
-  //SerialUSB.println(fw);
+  //SERIALPORT.println(fw);
   int convtime = ((int)(((cr&127)*128+249)/6.144)+0.5);
-  SerialUSB.println(convtime);
+  SERIALPORT.println(convtime);
 }
 
 //// DAC ////
@@ -347,7 +349,7 @@ void writeADCConversionTime(std::vector<String> DB)
   int adcChannel = DB[1].toInt();
   if(DB.size() != 3 || adcChannel > NUMADCCHANNELS-1)
   {
-    SerialUSB.println("SYNTAX ERROR");
+    SERIALPORT.println("SYNTAX ERROR");
     return;
   }
 
@@ -371,7 +373,7 @@ void writeADCConversionTime(std::vector<String> DB)
   cr=SPI.transfer(adc,0); //Read back the CT register
 
   int convtime = ((int)(((cr&127)*128+249)/6.144)+0.5);
-  SerialUSB.println(convtime);
+  SERIALPORT.println(convtime);
 }
 
 //// DAC ////
@@ -380,7 +382,7 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
 {
   if(DB.size() != 4)
   {
-    SerialUSB.println("SYNTAX ERROR");
+    SERIALPORT.println("SYNTAX ERROR");
     return;
   }
   float channel = DB[1].toInt();
@@ -424,7 +426,7 @@ void intRamp(std::vector<String> DB)
   //Do some bounds checking
   if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != g_numrampDACchannels * 2 + 4))
   {
-    SerialUSB.println("SYNTAX ERROR");
+    SERIALPORT.println("SYNTAX ERROR");
     return;
   }
   g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
@@ -439,16 +441,16 @@ void intRamp(std::vector<String> DB)
     DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set DACs to initial point
 
     #ifdef DEBUGRAMP
-    SerialUSB.print("DAC ch ");
-    SerialUSB.print(g_DACchanselect[i]);
-    SerialUSB.print(" Startpoint: ");
-    SerialUSB.print(g_DACstartpoint[i]);
-    SerialUSB.print(" Ramppoint: ");
-    SerialUSB.print((int32_t)(g_DACramppoint[i] / BIT31));
-    SerialUSB.print(", Finalpoint: ");
-    SerialUSB.print(g_DACendpoint[i]);
-    SerialUSB.print(", Stepsize: ");
-    SerialUSB.println((int32_t)(g_DACstep[i] / BIT31));
+    SERIALPORT.print("DAC ch ");
+    SERIALPORT.print(g_DACchanselect[i]);
+    SERIALPORT.print(" Startpoint: ");
+    SERIALPORT.print(g_DACstartpoint[i]);
+    SERIALPORT.print(" Ramppoint: ");
+    SERIALPORT.print((int32_t)(g_DACramppoint[i] / BIT31));
+    SERIALPORT.print(", Finalpoint: ");
+    SERIALPORT.print(g_DACendpoint[i]);
+    SERIALPORT.print(", Stepsize: ");
+    SERIALPORT.println((int32_t)(g_DACstep[i] / BIT31));
     #endif
   }
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
@@ -464,9 +466,9 @@ void intRamp(std::vector<String> DB)
     SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
 
     #ifdef DEBUGRAMP
-    SerialUSB.print("ADC ch: ");
-    SerialUSB.print(g_ADCchanselect[i]);
-    SerialUSB.println(" selected");
+    SERIALPORT.print("ADC ch: ");
+    SERIALPORT.print(g_ADCchanselect[i]);
+    SERIALPORT.println(" selected");
     #endif
   }
 
@@ -479,7 +481,7 @@ void intRamp(std::vector<String> DB)
   attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);
   while(!g_done)
   {
-    if(SerialUSB.available())
+    if(SERIALPORT.available())
     {
       std::vector<String> comm;
       comm = query_serial();
@@ -519,7 +521,7 @@ void spec_ana(std::vector<String> DB)
   // Do some bounds checking
   if((g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != 3))
   {
-    SerialUSB.println("SYNTAX ERROR");
+    SERIALPORT.println("SYNTAX ERROR");
     return;
   }
 
@@ -543,7 +545,7 @@ void spec_ana(std::vector<String> DB)
   while(!g_done)
   {
     // Look for user interrupt ("STOP")
-    if(SerialUSB.available())
+    if(SERIALPORT.available())
     {
       std::vector<String> comm;
       comm = query_serial();
@@ -582,7 +584,7 @@ void writetobuffer()
 
       if (g_buffindex >= USBBUFFSIZE)
       {
-        SerialUSB.write((char*)g_USBbuff, g_buffindex);
+        SERIALPORT.write((char*)g_USBbuff, g_buffindex);
         g_buffindex = 0;
       }
 
@@ -590,7 +592,7 @@ void writetobuffer()
       {
         if(g_buffindex > 0)
         {
-          SerialUSB.write((char*)g_USBbuff, g_buffindex);
+          SERIALPORT.write((char*)g_USBbuff, g_buffindex);
           g_buffindex = 0;
         }
         g_done = true;
@@ -646,7 +648,7 @@ void calADCwithDAC()
     buffer += ",";
   }
 
-  SerialUSB.println(buffer);
+  SERIALPORT.println(buffer);
 }
 
 void adc_zero_scale_cal(int ch)
@@ -772,7 +774,7 @@ void calDACoffset(byte ch, float offset)
   n = snprintf(buffertemp,100,"ch%d,%f,%d",ch,stepsize*1000000,numsteps);
   buffer = buffertemp;
 
-  SerialUSB.println(buffer);
+  SERIALPORT.println(buffer);
   writeDACoffset(ch, numsteps);
 }
 
@@ -798,7 +800,7 @@ void calDACgain(byte ch, float offset)
   n = snprintf(buffertemp,100,"%f,%d",stepsize*1000000,numsteps);
   buffer = buffertemp;
 
-  SerialUSB.println(buffer);
+  SERIALPORT.println(buffer);
   writeDACgain(ch, numsteps);
 }
 
@@ -860,13 +862,13 @@ void convertDACch(int *ch, int *spipin, int *ldacpin)
 void IDN()
 // return IDN string
 {
-  SerialUSB.println(IDSTRING);
+  SERIALPORT.println(IDSTRING);
 }
 
 void RDY()
 // retrun "READY"
 {
-  SerialUSB.println("READY");
+  SERIALPORT.println("READY");
 }
 
 void waitDRDY()
@@ -920,13 +922,13 @@ void sos()
 namespace std {
   void __throw_bad_alloc()
   {
-    SerialUSB.println("Unable to allocate memory");
+    SERIALPORT.println("Unable to allocate memory");
   }
 
   void __throw_length_error( char const*e )
   {
-    SerialUSB.print("Length Error :");
-    SerialUSB.println(e);
+    SERIALPORT.print("Length Error :");
+    SERIALPORT.println(e);
   }
 }
 
@@ -934,7 +936,7 @@ namespace std {
 
 float getSingleReading(int adcchan)
 {
-  SerialUSB.flush();
+  SERIALPORT.flush();
   int statusbyte=0;
   byte o2;
   byte o3;
@@ -1006,7 +1008,7 @@ void updatead()
 
       if (g_buffindex >= USBBUFFSIZE)
       {
-        SerialUSB.write((char*)g_USBbuff, g_buffindex);
+        SERIALPORT.write((char*)g_USBbuff, g_buffindex);
         g_buffindex = 0;
       }
 
@@ -1014,7 +1016,7 @@ void updatead()
       {
         if(g_buffindex > 0)
         {
-          SerialUSB.write((char*)g_USBbuff, g_buffindex);
+          SERIALPORT.write((char*)g_USBbuff, g_buffindex);
           g_buffindex = 0;
         }
         g_done = true;
@@ -1036,7 +1038,7 @@ void autoRamp1(std::vector<String> DB)
 {
   if(DB.size() != 6)
   {
-    SerialUSB.println("SYNTAX ERROR");
+    SERIALPORT.println("SYNTAX ERROR");
     return;
   }
 
@@ -1061,7 +1063,7 @@ float writeDAC(int dacChannel, float voltage, bool load)
   float actualvoltage;
   if(dacChannel >= NUMDACCHANNELS)
   {
-    SerialUSB.println("SYNTAX ERROR");
+    SERIALPORT.println("SYNTAX ERROR");
     return 0;
   }
   digitalWrite(data, HIGH);
