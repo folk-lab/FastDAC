@@ -31,6 +31,8 @@
 #define BIT47 0x100000000000
 
 #define SERIALPORT SerialUSB
+#define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
+
 
 int adc=52; //The SPI pin for the ADC
 int dac0 = 4; //The SPI pin for the DAC0
@@ -71,7 +73,7 @@ volatile uint32_t g_numsteps;
 
 void setup()
 {
-  SERIALPORT.begin(2000000);
+  SERIALPORT.begin(BAUDRATE);
 
   pinMode(ldac0,OUTPUT);
   digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
