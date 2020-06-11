@@ -177,10 +177,18 @@ std::vector<String> query_serial()
 }
 
 void loop()
-// look for incomming commands
+// look for incoming commands, update status
 {
   SERIALPORT.flush();
   std::vector<String> comm;
+  if(digitalRead(clock_lol) || digitalRead(clock_los))
+  {
+    digitalWrite(clock_led, LOW);
+  }
+  else
+  {
+    digitalWrite(clock_led, HIGH);
+  }
 
   if(SERIALPORT.available())
   {
