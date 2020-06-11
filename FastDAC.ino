@@ -21,6 +21,8 @@
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 
+#define OPTICAL //Comment this if still using old USB version
+
 #define USBBUFFSIZE 300// works up to 450, but at some value higher than that the behaviour is to wait and send >2000 byte packets. Don't know why.
 
 #define DACSETTLETIME  1//milliseconds to wait before starting ramp
@@ -30,24 +32,37 @@
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
 
+#ifdef OPTICAL
+#define SERIALPORT Serial1
+#else
 #define SERIALPORT SerialUSB
+#endif
+
+
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
+const int slave_master = 23; //low for master, high for slave
+const int clock_lol = 25; //active-high loss-of-lock signal from clock PLL
+const int clock_los = 27; //active-high loss-of-signal from clock PLL
+const int clock_led = 34; //on board clock ok led output
+const int adc_trig_out = 50; //active-low ADC trigger output, starts the sampling
+const int adc_trig_in = 49; //active-low ADC trigger input, for diagnostics
 
-int adc=52; //The SPI pin for the ADC
-int dac0 = 4; //The SPI pin for the DAC0
-int dac1 = 10; //The SPI pin for the DAC1
-int ldac0=6; //Load DAC1 pin for DAC1. Make it LOW if not in use.
-int ldac1=9; //Load DAC2 pin for DAC1. Make it LOW if not in use.
+
+const int adc=52; //The SPI pin for the ADC
+const int dac0 = 4; //The SPI pin for the DAC0
+const int dac1 = 10; //The SPI pin for the DAC1
+const int ldac0=6; //Load DAC1 pin for DAC1. Make it LOW if not in use.
+const int ldac1=9; //Load DAC2 pin for DAC1. Make it LOW if not in use.
 Pio *ldac_port = digitalPinToPort(ldac0); //ldac0 and ldac1 share the same port, so they can be toggled simultaneously
-uint32_t ldac0_mask = digitalPinToBitMask(ldac0);
-uint32_t ldac1_mask = digitalPinToBitMask(ldac1);
+const uint32_t ldac0_mask = digitalPinToBitMask(ldac0);
+const uint32_t ldac1_mask = digitalPinToBitMask(ldac1);
 
-int reset=44 ; //Reset on ADC
-int drdy=48; // Data is ready pin on ADC
-int led = 32;
-int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
-int err=30;
+const int reset=44 ; //Reset on ADC
+const int drdy=48; // Data is ready pin on ADC
+const int led = 32;
+const int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
+const int err=30;
 const int Noperations = 22;
 String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE"};
 
@@ -74,9 +89,19 @@ volatile uint32_t g_numsteps;
 void setup()
 {
   SERIALPORT.begin(BAUDRATE);
-
+  pinMode(slave_master, OUTPUT); //low for master, high for slave
+  digitalWrite(slave_master, LOW);
+  pinMode(clock_lol, INPUT); //active-high loss-of-lock signal from clock PLL
+  pinMode(clock_los, INPUT); //active-high loss-of-signal from clock PLL
+  pinMode(clock_led, OUTPUT); //on board clock ok led output
+  digitalWrite(clock_led, LOW);
+  pinMode(adc_trig_out, OUTPUT); //active-low ADC trigger output, starts the sampling
+  digitalWrite(adc_trig_out, LOW);
+  pinMode(adc_trig_in, INPUT); //active-low ADC trigger input, for diagnostics
+  
   pinMode(ldac0,OUTPUT);
   digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
+
 
   pinMode(ldac1,OUTPUT);
   digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
