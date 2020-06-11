@@ -608,6 +608,19 @@ void writetobuffer()
    int16_t i, temp;
    if(!g_done)
    {
+#ifdef OPTICAL //no buffer required for regular UART (optical)
+     for(i = 0; i < g_numrampADCchannels; i++)
+     {
+        SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+        SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
+        SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte
+     }
+     g_samplecount++;
+     if(g_samplecount >= g_numsteps)
+     {
+        g_done = true;
+     }
+#else
       for(i = 0; i < g_numrampADCchannels; i++)
       {
          SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); // Read channel data register
@@ -632,6 +645,7 @@ void writetobuffer()
         }
         g_done = true;
       }
+#endif      
    }
 }
 
@@ -1026,7 +1040,27 @@ void updatead()
    {
       ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
       ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-
+      
+#ifdef OPTICAL //no buffering with regular UART (optical)
+      if(g_samplecount > 0) //first sample comes in on second loop through the interrupt
+      {
+        for(i = 0; i < g_numrampADCchannels; i++)
+        {
+           SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+           SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
+           SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte
+        }
+      }
+      else
+      {
+        for(i = 0; i < g_numrampADCchannels; i++) //discard first loop
+        {
+           SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+           SPI.transfer(adc, 0, SPI_CONTINUE); // Read/write first byte
+           SPI.transfer(adc, 0); // Read/write second byte
+        }
+      }
+#else      
       for(i = 0; i < g_numrampADCchannels; i++)
       {
          SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
@@ -1039,8 +1073,16 @@ void updatead()
       {
         g_buffindex = 0;
       }
+#endif
+      
       g_samplecount++;
 
+#ifdef OPTICAL
+      if(g_samplecount > g_numsteps)
+      {        
+        g_done = true;
+      }
+#else      
       if (g_buffindex >= USBBUFFSIZE)
       {
         SERIALPORT.write((char*)g_USBbuff, g_buffindex);
@@ -1056,6 +1098,7 @@ void updatead()
         }
         g_done = true;
       }
+#endif      
       else
       {
         //get next DAC step ready if this isn't the last sample
