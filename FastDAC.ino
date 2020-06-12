@@ -137,7 +137,7 @@ void setup()
   SPI.setDataMode(dac0,SPI_MODE1); //This should be 1 for the AD5764
   SPI.setDataMode(dac1,SPI_MODE1); //This should be 1 for the AD5764
 
-  loaddefaultcals();
+  //loaddefaultcals(); //Only useful if per-unit cals are done, otherwise it's way off
   //Initialize saved DAC setpoints to 0
   for(int i = 0; i < NUMDACCHANNELS; i++)
   {
