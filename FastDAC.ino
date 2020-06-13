@@ -38,8 +38,11 @@
 #define SERIALPORT SerialUSB
 #endif
 
-
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
+
+typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
+MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
+bool g_clock_synced = false;
 
 const int slave_master = 23; //low for master, high for slave
 const int clock_lol = 25; //active-high loss-of-lock signal from clock PLL
@@ -63,8 +66,8 @@ const int drdy=48; // Data is ready pin on ADC
 const int led = 32;
 const int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
 const int err=30;
-const int Noperations = 22;
-String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE"};
+const int Noperations = 25;
+String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC"};
 
 float DAC_FULL_SCALE = 10.0;
 
@@ -89,19 +92,24 @@ volatile uint32_t g_numsteps;
 void setup()
 {
   SERIALPORT.begin(BAUDRATE);
+
+  g_ms_select = INDEP; //Defaults to independent  
   pinMode(slave_master, OUTPUT); //low for master, high for slave
   digitalWrite(slave_master, LOW);
+  pinMode(adc_trig_out, OUTPUT); //active-high ADC trigger output, starts the sampling
+  digitalWrite(adc_trig_out, HIGH);
+  pinMode(adc_trig_in, INPUT); //active-low ADC trigger input, for diagnostics
+  
   pinMode(clock_lol, INPUT); //active-high loss-of-lock signal from clock PLL
   pinMode(clock_los, INPUT); //active-high loss-of-signal from clock PLL
   pinMode(clock_led, OUTPUT); //on board clock ok led output
   digitalWrite(clock_led, LOW);
-  pinMode(adc_trig_out, OUTPUT); //active-low ADC trigger output, starts the sampling
-  digitalWrite(adc_trig_out, LOW);
-  pinMode(adc_trig_in, INPUT); //active-low ADC trigger input, for diagnostics
+
+
   
   pinMode(ldac0,OUTPUT);
   digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
-
+  
 
   pinMode(ldac1,OUTPUT);
   digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
@@ -183,10 +191,12 @@ void loop()
   std::vector<String> comm;
   if(digitalRead(clock_lol) || digitalRead(clock_los))
   {
+    g_clock_synced = false;
     digitalWrite(clock_led, LOW);
   }
   else
   {
+    g_clock_synced = true;
     digitalWrite(clock_led, HIGH);
   }
 
@@ -225,8 +235,11 @@ void router(std::vector<String> DB)
     break;
 
     case 5: // GET_ADC
-    v=readADC(DB[1].toInt());
-    SERIALPORT.println(v,4);
+    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
+    {
+      v=readADC(DB[1].toInt());
+      SERIALPORT.println(v,4);
+    }
     break;
 
     case 6: // RAMP_SMART
@@ -235,13 +248,19 @@ void router(std::vector<String> DB)
     break;
 
     case 7: // INT_RAMP
-    intRamp(DB);
-    SERIALPORT.println("RAMP_FINISHED");
+    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0) //make sure ADC has a clock and sync armed if not indep mode
+    {
+      intRamp(DB);
+      SERIALPORT.println("RAMP_FINISHED");
+    }   
     break;
 
     case 8: // SPEC_ANA
-    spec_ana(DB);
-    SERIALPORT.println("READ_FINISHED");
+    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0) //make sure ADC has a clock and sync armed if not indep mode
+    {
+      spec_ana(DB);
+      SERIALPORT.println("READ_FINISHED");
+    }
     break;
 
     case 9: // CONVERT_TIME
@@ -253,25 +272,37 @@ void router(std::vector<String> DB)
     break;
 
     case 11: // CAL_ADC_WITH_DAC
-    calADCwithDAC();
-    SERIALPORT.println("CALIBRATION_FINISHED");
+    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
+    {
+      calADCwithDAC();
+      SERIALPORT.println("CALIBRATION_FINISHED");
+    }
     break;
 
     case 12: // ADC_ZERO_SC_CAL
-    adc_zero_scale_cal(DB[1].toInt());
-    SERIALPORT.println("CALIBRATION_FINISHED");
+    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
+    {
+      adc_zero_scale_cal(DB[1].toInt());
+      SERIALPORT.println("CALIBRATION_FINISHED");
+    }    
     break;
 
     case 13: // ADC_CH_ZERO_SC_CAL
-    buffer = adc_ch_zero_scale_cal(DB[1].toInt());
-    SERIALPORT.println(buffer);
-    SERIALPORT.println("CALIBRATION_FINISHED");
+    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
+    {
+      buffer = adc_ch_zero_scale_cal(DB[1].toInt());
+      SERIALPORT.println(buffer);
+      SERIALPORT.println("CALIBRATION_FINISHED");  
+    }    
     break;
 
     case 14: // ADC_CH_FULL_SC_CAL
-    buffer = adc_ch_full_scale_cal(DB[1].toInt());
-    SERIALPORT.println(buffer);
-    SERIALPORT.println("CALIBRATION_FINISHED");
+    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
+    {
+      buffer = adc_ch_full_scale_cal(DB[1].toInt());
+      SERIALPORT.println(buffer);
+      SERIALPORT.println("CALIBRATION_FINISHED");
+    }
     break;
 
     case 15: // READ_ADC_CAL
@@ -309,6 +340,22 @@ void router(std::vector<String> DB)
     case 21: // FULL_SCALE
     DAC_FULL_SCALE = DB[1].toFloat();
     SERIALPORT.println("FULL_SCALE_UPDATED");
+    break;
+
+    case 22: //SET_MODE
+    set_mode(DB[1]);    
+    break;
+
+    case 23: //ARM_SYNC
+    digitalWrite(adc_trig_out, LOW);
+    SERIALPORT.println("SYNC_ARMED");
+    break;
+
+    case 24: //CHECK_SYNC
+    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0)
+    {
+      SERIALPORT.println("CLOCK_SYNC_READY");    
+    }
     break;
 
     default:
@@ -463,7 +510,8 @@ void intRamp(std::vector<String> DB)
   {
     SERIALPORT.println("SYNTAX ERROR");
     return;
-  }
+  }  
+
   g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
   for(i = 0; i < g_numrampDACchannels; i++)
   {
@@ -508,12 +556,15 @@ void intRamp(std::vector<String> DB)
   }
 
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_RDYFN); //Change RDY to only trigger when all channels complete
+  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
 
   delayMicroseconds(1000); // wait for DACs to settle
   digitalWrite(data,HIGH);
 
   attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);
+
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
   while(!g_done)
   {
     if(SERIALPORT.available())
@@ -528,7 +579,7 @@ void intRamp(std::vector<String> DB)
   }
   detachInterrupt(digitalPinToInterrupt(drdy));
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_DEFAULT); //Change RDY to trigger when any channel complete
+  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
   for(i = 0; i < NUMADCCHANNELS; i++)
   {
   SPI.transfer(adc, ADC_CHSETUP | i);//Access channel setup register
@@ -572,11 +623,13 @@ void spec_ana(std::vector<String> DB)
   }
 
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_RDYFN); //Change RDY to only trigger when all channels complete
+  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and wait for sync, P1 as input
 
   digitalWrite(data,HIGH);
 
   attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
   while(!g_done)
   {
     // Look for user interrupt ("STOP")
@@ -592,7 +645,7 @@ void spec_ana(std::vector<String> DB)
   }
   detachInterrupt(digitalPinToInterrupt(drdy));
   SPI.transfer(adc, ADC_IO); // Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_DEFAULT); // Change RDY to trigger when any channel complete
+  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); // Change RDY to trigger when any channel complete
   for(i = 0; i < NUMADCCHANNELS; i++)
   {
   SPI.transfer(adc, ADC_CHSETUP | i); // Access channel setup register
@@ -1246,4 +1299,52 @@ int32_t voltageToInt32(float voltage)
     calcint = (int32_t)((voltage/DAC_FULL_SCALE) * 0x80000000);
   }
   return calcint;
+}
+
+//// SYNC UTIL ////
+
+void set_mode(String mode)
+{
+    if(mode == "MASTER")
+    {
+      digitalWrite(slave_master, LOW);
+      g_ms_select = MASTER;
+      SERIALPORT.println("MASTER_SET");  
+    }
+    else if(mode == "SLAVE")
+    {
+      digitalWrite(slave_master, HIGH);
+      g_ms_select = SLAVE;
+      SERIALPORT.println("SLAVE_SET");  
+    }
+    else if(mode == "INDEP")
+    {
+      digitalWrite(slave_master , LOW);
+      g_ms_select = INDEP;
+      SERIALPORT.println("INDEP_SET");
+    }
+    else
+    {
+      SERIALPORT.println("SYNTAX_ERROR");
+    }
+    
+}
+
+uint8_t check_sync(uint8_t mask) //Checks for valid clock and sync signal, returns 0 if ok, 1-3 if not: 1 (clock not ok) or'ed with 2 (sync_ok)
+{
+  uint8_t syncstatus = 0;
+  if(!g_clock_synced && (mask & 0x1))
+  {
+    syncstatus |= 1;
+    SERIALPORT.println("CLOCK_NOT_READY");
+  }
+  if(g_ms_select != INDEP)
+  {
+    if((digitalRead(adc_trig_in) == true) && (mask & 0x2))
+    {
+      syncstatus |= 2;
+      SERIALPORT.println("SYNC_NOT_READY");
+    }
+  }
+  return syncstatus;
 }

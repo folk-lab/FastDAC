@@ -73,3 +73,6 @@
 #define DAC_FUNC_D0DIR 0x04
 #define DAC_FUNC_D0VAL 0x02
 #define DAC_FUNC_SDODISABLE 0x01
+
+#define CHECK_CLOCK 0x1
+#define CHECK_SYNC 0x2
