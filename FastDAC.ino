@@ -1409,6 +1409,9 @@ uint8_t check_sync(uint8_t mask) //Checks for valid clock and sync signal, retur
       SERIALPORT.println("SYNC_NOT_READY");
     }
   }
+#ifndef OPTICAL //no external clock or sync without optical
+  syncstatus = 0;
+#endif 
   return syncstatus;
 }
 
