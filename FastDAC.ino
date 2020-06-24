@@ -1396,6 +1396,7 @@ void set_mode(String mode)
 uint8_t check_sync(uint8_t mask) //Checks for valid clock and sync signal, returns 0 if ok, 1-3 if not: 1 (clock not ok) or'ed with 2 (sync_ok)
 {
   uint8_t syncstatus = 0;
+#ifdef OPTICAL //only check clock and sync with optical version
   if(!g_clock_synced && (mask & 0x1))
   {
     syncstatus |= 1;
@@ -1409,8 +1410,6 @@ uint8_t check_sync(uint8_t mask) //Checks for valid clock and sync signal, retur
       SERIALPORT.println("SYNC_NOT_READY");
     }
   }
-#ifndef OPTICAL //no external clock or sync without optical
-  syncstatus = 0;
 #endif 
   return syncstatus;
 }
