@@ -21,7 +21,7 @@
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 
-//#define OPTICAL //Comment this if still using old USB version
+#define OPTICAL //Comment this if still using old USB version
 
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
@@ -66,9 +66,9 @@ const uint32_t ldac1_mask = digitalPinToBitMask(ldac1);
 
 const int reset=44 ; //Reset on ADC
 const int drdy=48; // Data is ready pin on ADC
-const int led = 32;
-const int data=28;//Used for trouble shooting; connect an LED between pin 28 and GND
-const int err=30;
+const int led = 28;
+const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
+const int err=32;
 const int Noperations = 29;
 String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
 "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
