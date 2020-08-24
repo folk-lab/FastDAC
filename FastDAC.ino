@@ -169,7 +169,7 @@ void setup()
   SPI.setBitOrder(dac0,MSBFIRST); //correct order for AD5764.
   SPI.setBitOrder(dac1,MSBFIRST); //correct order for AD5764.
 
-  SPI.setClockDivider(adc,7); // Maximum 12 Mhz for AD7734
+  SPI.setClockDivider(adc,8); // Maximum 10.5 Mhz for AD7734
   SPI.setClockDivider(dac0,4); // Maximum 21 Mhz for AD5764
   SPI.setClockDivider(dac1,4); // Maximum 21 Mhz for AD5764
 
