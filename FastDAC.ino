@@ -51,6 +51,7 @@ const int slave_master = 23; //low for master, high for slave
 const int clock_lol = 25; //active-high loss-of-lock signal from clock PLL
 const int clock_los = 27; //active-high loss-of-signal from clock PLL
 const int clock_led = 34; //on board clock ok led output
+const int ext_clock_led = 32; //external clock ok led output
 const int adc_trig_out = 50; //active-low ADC trigger output, starts the sampling
 const int adc_trig_in = 49; //active-low ADC trigger input, for diagnostics
 
@@ -68,7 +69,7 @@ const int reset=44 ; //Reset on ADC
 const int drdy=48; // Data is ready pin on ADC
 const int led = 28;
 const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
-const int err=32;
+const int err=35;
 const int Noperations = 29;
 String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
 "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
@@ -135,7 +136,9 @@ void setup()
   pinMode(clock_lol, INPUT); //active-high loss-of-lock signal from clock PLL
   pinMode(clock_los, INPUT); //active-high loss-of-signal from clock PLL
   pinMode(clock_led, OUTPUT); //on board clock ok led output
+  pinMode(ext_clock_led, OUTPUT); //on board clock ok led output
   digitalWrite(clock_led, LOW);
+  digitalWrite(ext_clock_led, LOW);
 
 
   
@@ -225,11 +228,13 @@ void loop()
   {
     g_clock_synced = false;
     digitalWrite(clock_led, LOW);
+    digitalWrite(ext_clock_led, LOW);
   }
   else
   {
     g_clock_synced = true;
     digitalWrite(clock_led, HIGH);
+    digitalWrite(ext_clock_led, HIGH);
   }
 
   if(SERIALPORT.available())
