@@ -17,6 +17,7 @@
 
 #include "SPI.h" // necessary library for SPI communication
 
+#include <PID_v1.h> // needed for PID correction
 #include <vector>
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
@@ -757,6 +758,27 @@ void writetobuffer()
 #endif      
    }
 }
+
+////////////////////////////
+//// PID Correction    ////
+///////////////////////////
+
+void pidloop(int adcch, int dacch, float setpoint)
+{
+  float spoint, input, output;
+  spoint = setpoint
+  PID myPID(&input, &output, &spoint, 2, 5, 1, DIRECT); //Setup PID
+  input = getDAC(dacch);
+  myPID.SetSampleTime(1);
+  myPID.SetMode(Automatic);
+  
+  while(pidinterrupt != 1)
+  {
+    
+    
+  }
+}
+
 
 //////////////////////
 //// CALIBRATION ////
