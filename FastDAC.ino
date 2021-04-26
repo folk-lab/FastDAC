@@ -22,7 +22,7 @@
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 
-#define OPTICAL //Comment this if still using old USB version
+//#define OPTICAL //Comment this if still using old USB version
 
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
@@ -765,14 +765,15 @@ void writetobuffer()
 
 void pidloop(int adcch, int dacch, float setpoint)
 {
-  float spoint, input, output;
-  spoint = setpoint
-  PID myPID(&input, &output, &spoint, 2, 5, 1, DIRECT); //Setup PID
+  bool pidinterrupt = false;
+  double spoint, input, output;
+  spoint = setpoint;
+  PID myPID(&input, &output, &spoint, 2.0, 5.0, 1.0, DIRECT); //Setup PID
   input = getDAC(dacch);
   myPID.SetSampleTime(1);
-  myPID.SetMode(Automatic);
+  myPID.SetMode(AUTOMATIC);
   
-  while(pidinterrupt != 1)
+  while(pidinterrupt == false)
   {
     
     
