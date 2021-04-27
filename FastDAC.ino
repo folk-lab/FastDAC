@@ -196,7 +196,7 @@ void setup()
 std::vector<String> query_serial()
 // read incomming serial commands
 {
-  char received;
+  char received = 0;
   String inByte = "";
   std::vector<String> comm;
   while (received != '\r')
@@ -551,19 +551,16 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
 
 void intRamp(std::vector<String> DB)
 {
-  int i, j;
-  bool error = false;
+  int i;
   String channelsDAC = DB[1];
   g_numrampDACchannels = channelsDAC.length();
   String channelsADC = DB[2];
   g_numrampADCchannels = channelsADC.length();
-  float v_min = -1 * DAC_FULL_SCALE;
-  float v_max = DAC_FULL_SCALE;
 
   g_done = false;
   g_stepcount = 0;
   //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != g_numrampDACchannels * 2 + 4))
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 4))
   {
     SERIALPORT.println("SYNTAX ERROR");
     return;
@@ -653,8 +650,7 @@ void intRamp(std::vector<String> DB)
 
 void spec_ana(std::vector<String> DB)
 {
-  int i, j;
-  bool error = false;
+  int i;
   String channelsADC = DB[1];
   g_numrampADCchannels = channelsADC.length();
   g_numsteps=DB[2].toInt();
@@ -715,7 +711,7 @@ void spec_ana(std::vector<String> DB)
 
 void writetobuffer()
 {
-   int16_t i, temp;
+   int16_t i;
    if(!g_done)
    {
 #ifdef OPTICAL //no buffer required for regular UART (optical)
@@ -866,7 +862,7 @@ String readADCzerocal(byte ch)
   b2 = SPI.transfer(adc,0x00);   // read byte 2
   b3 = SPI.transfer(adc,0x00);   // read byte 3
 
-  calvalue += b1 << 16;
+  calvalue = b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
 
@@ -901,7 +897,7 @@ String readADCfullcal(byte ch)
   b2 = SPI.transfer(adc,0x00);   // read byte 2
   b3 = SPI.transfer(adc,0x00);   // read byte 3
 
-  calvalue += b1 << 16;
+  calvalue = b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
 
@@ -1149,6 +1145,10 @@ float getSingleReading(int adcchan)
     voltage = map2(decimal, 0, 65536, -10000.0, 10000.0);
     return voltage;
   }
+  else
+  {
+    return -999999.9;
+  }
 }
 
 float map2(float x, long in_min, long in_max, float out_min, float out_max)
@@ -1179,7 +1179,7 @@ void resetADC()
 
 void updatead()
 {
-   int16_t i, temp;
+   int16_t i;
    if(!g_done)
    {
       ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
@@ -1356,7 +1356,6 @@ float int16ToVoltage(int16_t data)
 int16_t voltageToInt16(float voltage)
 // map float voltage to 16bit int
 {
-  int decimal;
   if (voltage > DAC_FULL_SCALE || voltage < -1*DAC_FULL_SCALE)
   {
     error();
@@ -1552,7 +1551,6 @@ void clr_wave(std::vector<String> DB)
 void awg_ramp(std::vector<String> DB)
 {
   int i, j;
-  bool error = false;
   g_numwaves = DB[1].toInt(); //First parameter
   if(g_numwaves > AWGMAXWAVES)
   {
@@ -1593,14 +1591,12 @@ void awg_ramp(std::vector<String> DB)
   g_numrampDACchannels = channelsDAC.length();
   String channelsADC = DB[g_numwaves + 3];
   g_numrampADCchannels = channelsADC.length();
-  float v_min = -1 * DAC_FULL_SCALE;
-  float v_max = DAC_FULL_SCALE;
 
   g_done = false;
   g_firstsamples = true;
   
   //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != g_numrampDACchannels * 2 + 6 + g_numwaves))
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 6 + g_numwaves))
   {
     SERIALPORT.println("SYNTAX ERROR");
     return;
