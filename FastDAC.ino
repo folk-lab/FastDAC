@@ -27,6 +27,8 @@
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
 
+#define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
+
 #define USBBUFFSIZE 300// works up to 450, but at some value higher than that the behaviour is to wait and send >2000 byte packets. Don't know why. Not used with optical comms
 
 #define DACSETTLETIME  1//milliseconds to wait before starting ramp
@@ -71,10 +73,11 @@ const int drdy=48; // Data is ready pin on ADC
 const int led = 28;
 const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
 const int err=35;
-const int Noperations = 29;
+const int Noperations = 34;
 String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
 "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
-"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP"};
+"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
+"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS"};
 
 float DAC_FULL_SCALE = 10.0;
 
@@ -113,7 +116,6 @@ typedef struct AWGwave
 
 AWGwave g_awgwave[AWGMAXWAVES];
 
-
 volatile uint8_t g_numwaves;
 
 volatile uint32_t g_numloops;
@@ -121,10 +123,30 @@ volatile uint32_t g_loopcount;
 
 volatile bool g_nextloop = false;
 
+//PID Specific
+typedef struct PIDparam
+{
+  bool active = false;
+  uint8_t ADCchan = 0;
+  uint8_t DACchan = 0;
+  uint16_t sampletime = 10;
+  double adcin = 0.0;
+  double dacout = 0.0;
+  double setpoint = 0.0;
+  double dacmin = -10000.0;
+  double dacmax = 10000.0;
+  double kp = 1.0;
+  double ki = 1.0;
+  double kd = 0.0;
+}PIDparam;
+
+PIDparam g_pidparam[MAXNUMPIDS];
+
+PID pid0(&(g_pidparam[0].adcin), &(g_pidparam[0].dacout), &(g_pidparam[0].setpoint), g_pidparam[0].kp, g_pidparam[0].ki, g_pidparam[0].kd, DIRECT);
 
 
 void setup()
-{
+{    
   SERIALPORT.begin(BAUDRATE);
 
   g_ms_select = INDEP; //Defaults to independent  
@@ -140,12 +162,9 @@ void setup()
   pinMode(ext_clock_led, OUTPUT); //on board clock ok led output
   digitalWrite(clock_led, LOW);
   digitalWrite(ext_clock_led, LOW);
-
-
   
   pinMode(ldac0,OUTPUT);
-  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
-  
+  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.  
 
   pinMode(ldac1,OUTPUT);
   digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
@@ -414,7 +433,32 @@ void router(std::vector<String> DB)
       awg_ramp(DB);
       SERIALPORT.println("RAMP_FINISHED");
     }
+    break;
+    
+    case 29: //START_PID
+    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0)
+    {
+      start_pid(DB);
+      //SERIALPORT.println("PID_FINISHED");
+    }
+    break;
+    
+    case 30: //STOP_PID
+    stop_pid(DB);
+    break;
 
+    case 31://SET_PID_TUNE
+    set_pid_tune(DB);
+    break;
+
+    case 32://SET_PID_SETP
+    set_pid_setp(DB);
+    break;
+
+    case 33://SET_PID_LIMS
+    set_pid_lims(DB);
+    break;
+    
     default:
     break;
   }
@@ -759,27 +803,92 @@ void writetobuffer()
 //// PID Correction    ////
 ///////////////////////////
 
-void pidloop(int adcch, int dacch, float setpoint)
+void start_pid(std::vector<String> DB)
 {
-  bool pidinterrupt = false;
-  double spoint, input, output;
-  spoint = setpoint;
-  PID myPID(&input, &output, &spoint, 2.0, 5.0, 1.0, DIRECT); //Setup PID
-  input = getDAC(dacch);
-  myPID.SetSampleTime(1);
-  myPID.SetMode(AUTOMATIC);
+  pid0.SetSampleTime(g_pidparam[0].sampletime);
+  pid0.SetMode(AUTOMATIC);
+  pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);
   
-  while(pidinterrupt == false)
-  {
-    
-    
+  SPI.transfer(adc, ADC_CHSETUP | g_pidparam[0].ADCchan);//Access channel setup register
+  SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
+  SPI.transfer(adc, ADC_CHMODE | g_pidparam[0].ADCchan);   //Access channel mode register
+  SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
+  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
+
+  attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
+  
+}
+
+void pidint(void)
+{
+  uint8_t b1, b2;
+  int decimal;
+  int16_t i;
+  ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
+  ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+
+  SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_pidparam[0].ADCchan, SPI_CONTINUE); //Read channel data register
+  b1 = (SPI.transfer(adc, 0, SPI_CONTINUE)); // Read first byte
+  b2 = SPI.transfer(adc, 0); // Read second byte
+  
+  decimal = twoByteToInt(b1, b2);
+  g_pidparam[0].adcin = map2(decimal, 0, 65536, -10000.0, 10000.0);   
+  if(pid0.Compute())
+  {    
+    writeDAC(g_pidparam[0].DACchan, g_pidparam[0].dacout, true);
+    SERIALPORT.print("IN: ");
+    SERIALPORT.print(g_pidparam[0].adcin);
+    SERIALPORT.print(" OUT: ");
+    SERIALPORT.println(g_pidparam[0].dacout);
   }
+  
+
+}
+
+void stop_pid(std::vector<String> DB)
+{
+  uint8_t i = 0;
+  pid0.SetMode(MANUAL);
+  detachInterrupt(digitalPinToInterrupt(drdy));
+  
+  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
+  for(i = 0; i < NUMADCCHANNELS; i++)
+  {
+  SPI.transfer(adc, ADC_CHSETUP | i);//Access channel setup register
+  SPI.transfer(adc, ADC_CHSETUP_RNG10BI);//set +/-10V range and disable for continuous mode
+  SPI.transfer(adc, ADC_CHMODE | i);   //Access channel mode register
+  SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
+  }
+}
+
+void set_pid_tune(std::vector<String> DB)
+{
+  g_pidparam[0].kp = DB[1].toFloat();
+  g_pidparam[0].ki = DB[2].toFloat();
+  g_pidparam[0].kd = DB[3].toFloat();
+  pid0.SetTunings(g_pidparam[0].kp, g_pidparam[0].ki, g_pidparam[0].kd);    
+}
+
+void set_pid_setp(std::vector<String> DB)
+{
+  g_pidparam[0].setpoint = DB[1].toFloat();  
+}
+
+void set_pid_lims(std::vector<String> DB)
+{
+  g_pidparam[0].dacmin = DB[1].toFloat();
+  g_pidparam[0].dacmax = DB[2].toFloat();
+  
+  pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);    
 }
 
 
 //////////////////////
 //// CALIBRATION ////
 /////////////////////
+
 
 void loaddefaultcals()
 {
