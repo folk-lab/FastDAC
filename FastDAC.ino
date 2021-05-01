@@ -806,6 +806,8 @@ void writetobuffer()
 //Start PID, currently DAC0 and ADC0, no inputs params, just starts
 void start_pid(std::vector<String> DB)
 {
+  g_pidparam[0].dacout = getDAC(0);//Start from current dac setpoint
+  
   pid0.SetSampleTime(g_pidparam[0].sampletime);
   pid0.SetMode(AUTOMATIC);
   pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);
