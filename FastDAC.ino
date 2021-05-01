@@ -803,6 +803,7 @@ void writetobuffer()
 //// PID Correction    ////
 ///////////////////////////
 
+//Start PID, currently DAC0 and ADC0, no inputs params, just starts
 void start_pid(std::vector<String> DB)
 {
   pid0.SetSampleTime(g_pidparam[0].sampletime);
@@ -819,14 +820,12 @@ void start_pid(std::vector<String> DB)
   attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
   
 }
-
+//PID Interrupts every ADC sample
 void pidint(void)
 {
   uint8_t b1, b2;
   int decimal;
   int16_t i;
-  ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
-  ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
 
   SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_pidparam[0].ADCchan, SPI_CONTINUE); //Read channel data register
   b1 = (SPI.transfer(adc, 0, SPI_CONTINUE)); // Read first byte
@@ -846,6 +845,7 @@ void pidint(void)
 
 }
 
+//Stop PID, no inputs params, just stops 
 void stop_pid(std::vector<String> DB)
 {
   uint8_t i = 0;
@@ -862,22 +862,41 @@ void stop_pid(std::vector<String> DB)
   SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
   }
 }
+//SET_PID_TUNE,<P-coeff>,<I-coeff>,<D-coeff>
 
 void set_pid_tune(std::vector<String> DB)
 {
+
+  if(DB.size() != 4)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
   g_pidparam[0].kp = DB[1].toFloat();
   g_pidparam[0].ki = DB[2].toFloat();
   g_pidparam[0].kd = DB[3].toFloat();
   pid0.SetTunings(g_pidparam[0].kp, g_pidparam[0].ki, g_pidparam[0].kd);    
 }
 
+//SET_PID_SETP,<Setpoint in mV>
 void set_pid_setp(std::vector<String> DB)
 {
+  if(DB.size() != 2)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
   g_pidparam[0].setpoint = DB[1].toFloat();  
 }
 
+//SET_PID_LIMS,<Lower limit in mV>,<Upper limit in mV>
 void set_pid_lims(std::vector<String> DB)
 {
+  if(DB.size() != 3)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
   g_pidparam[0].dacmin = DB[1].toFloat();
   g_pidparam[0].dacmax = DB[2].toFloat();
   
