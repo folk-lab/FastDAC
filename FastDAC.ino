@@ -73,11 +73,11 @@ const int drdy=48; // Data is ready pin on ADC
 const int led = 28;
 const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
 const int err=35;
-const int Noperations = 34;
+const int Noperations = 35;
 String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
 "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
 "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
-"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS"};
+"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR"};
 
 float DAC_FULL_SCALE = 10.0;
 
@@ -127,6 +127,7 @@ volatile bool g_nextloop = false;
 typedef struct PIDparam
 {
   bool active = false;
+  bool forward_dir = true;
   uint8_t ADCchan = 0;
   uint8_t DACchan = 0;
   uint16_t sampletime = 10;
@@ -135,7 +136,7 @@ typedef struct PIDparam
   double setpoint = 0.0;
   double dacmin = -10000.0;
   double dacmax = 10000.0;
-  double kp = 1.0;
+  double kp = 0.1;
   double ki = 1.0;
   double kd = 0.0;
 }PIDparam;
@@ -457,6 +458,10 @@ void router(std::vector<String> DB)
 
     case 33://SET_PID_LIMS
     set_pid_lims(DB);
+    break;
+
+    case 34://SET_PID_DIR
+    set_pid_dir(DB);
     break;
     
     default:
@@ -809,6 +814,16 @@ void start_pid(std::vector<String> DB)
   g_pidparam[0].dacout = getDAC(0);//Start from current dac setpoint
   
   pid0.SetSampleTime(g_pidparam[0].sampletime);
+  
+  if(g_pidparam[0].forward_dir == false)
+  {
+    pid0.SetControllerDirection(REVERSE);
+  }
+  else
+  {
+    pid0.SetControllerDirection(DIRECT);
+  }
+  
   pid0.SetMode(AUTOMATIC);
   pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);
   
@@ -904,6 +919,27 @@ void set_pid_lims(std::vector<String> DB)
   
   pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);    
 }
+
+//SET_PID_DIR,<1 for forward, 0 for reverse>
+void set_pid_dir(std::vector<String> DB)
+{
+  if(DB.size() != 2)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
+  if(DB[1].toInt() == 0)
+  {
+    g_pidparam[0].forward_dir = false;
+    pid0.SetControllerDirection(REVERSE);
+  }
+  else
+  {
+    g_pidparam[0].forward_dir = true;
+    pid0.SetControllerDirection(DIRECT);
+  }
+}
+
 
 
 //////////////////////
