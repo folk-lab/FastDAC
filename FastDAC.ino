@@ -22,7 +22,7 @@
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 
-//#define OPTICAL //Comment this if still using old USB version
+#define OPTICAL //Comment this if still using old USB version
 
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
