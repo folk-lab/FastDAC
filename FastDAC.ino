@@ -206,7 +206,7 @@ void setup()
   for(int i = 0; i < NUMDACCHANNELS; i++)
   {
     g_DACsetpoint[i] = 0;
-  }  
+  }
 }
 
 ////////////////
@@ -835,6 +835,7 @@ void start_pid(std::vector<String> DB)
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
 
   attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
+  NVIC_SetPriority(PIOC_IRQn, 1);
   
 }
 //PID Interrupts every ADC sample
