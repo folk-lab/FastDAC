@@ -17,7 +17,7 @@
 
 #include "SPI.h" // necessary library for SPI communication
 
-#include <PID_v1.h> // needed for PID correction
+#include "src/PID/PID_v1.h" // Our own 'fork' of https://github.com/br3ttb/Arduino-PID-Library/
 #include <vector>
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
