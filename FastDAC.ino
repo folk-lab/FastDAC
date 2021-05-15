@@ -46,6 +46,13 @@
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
+const int Noperations = 35;
+String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
+"READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
+"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
+"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR"};
+
+
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
 bool g_clock_synced = false;
@@ -73,11 +80,6 @@ const int drdy=48; // Data is ready pin on ADC
 const int led = 28;
 const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
 const int err=35;
-const int Noperations = 35;
-String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
-"READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
-"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
-"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR"};
 
 float DAC_FULL_SCALE = 10.0;
 
@@ -131,6 +133,7 @@ typedef struct PIDparam
   uint8_t ADCchan = 0;
   uint8_t DACchan = 0;
   uint16_t sampletime = 10;
+  uint32_t loopcount = 0;
   double adcin = 0.0;
   double dacout = 0.0;
   double setpoint = 0.0;
@@ -326,7 +329,7 @@ void router(std::vector<String> DB)
     break;
 
     case 10: // READ_CONVERT_TIME
-    readADCConversionTime(DB);
+    read_convert_time(DB);
     break;
 
     case 11: // CAL_ADC_WITH_DAC
@@ -495,7 +498,7 @@ float readADC(byte DB)
   return voltage; // return mV
 }
 
-void readADCConversionTime(std::vector<String> DB)
+void read_convert_time(std::vector<String> DB)
 {
   if(DB.size() != 2)
   {
@@ -504,17 +507,23 @@ void readADCConversionTime(std::vector<String> DB)
   }
   int adcChannel;
   adcChannel = DB[1].toInt();
-  if (adcChannel < 0 || adcChannel > 3)
+  
+  SERIALPORT.println(readADCConversionTime(adcChannel));
+}
+
+int readADCConversionTime(int ch)
+{
+  if (ch < 0 || ch > 3)
   {
     SERIALPORT.println("ADC channel must be between 0 - 3");
-    return;
+    return -1;
   }
   byte cr;
-  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | adcChannel); //Read conversion time register
+  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | ch); //Read conversion time register
   cr=SPI.transfer(adc,0); //Read back the CT register
   //SERIALPORT.println(fw);
-  int convtime = ((int)(((cr&127)*128+249)/6.144)+0.5);
-  SERIALPORT.println(convtime);
+  int contime = ((int)(((cr&127)*128+249)/6.144)+0.5);
+  return contime;
 }
 
 //// DAC ////
@@ -813,6 +822,8 @@ void start_pid(std::vector<String> DB)
 {
   g_pidparam[0].dacout = getDAC(0);//Start from current dac setpoint
   
+  g_pidparam[0].sampletime = readADCConversionTime(g_pidparam[0].ADCchan);//Get PID sample time in microsec from adc channel conversion time
+  
   pid0.SetSampleTime(g_pidparam[0].sampletime);
   
   if(g_pidparam[0].forward_dir == false)
@@ -850,14 +861,28 @@ void pidint(void)
   b2 = SPI.transfer(adc, 0); // Read second byte
   
   decimal = twoByteToInt(b1, b2);
-  g_pidparam[0].adcin = map2(decimal, 0, 65536, -10000.0, 10000.0);   
+  g_pidparam[0].adcin = map2(decimal, 0, 65536, -10000.0, 10000.0);
+    
   if(pid0.Compute())
   {    
     writeDAC(g_pidparam[0].DACchan, g_pidparam[0].dacout, true);
-    SERIALPORT.print("IN: ");
-    SERIALPORT.print(g_pidparam[0].adcin);
-    SERIALPORT.print(" OUT: ");
-    SERIALPORT.println(g_pidparam[0].dacout);
+    g_pidparam[0].loopcount++;
+    if(g_pidparam[0].loopcount >= 10)
+    {
+      g_pidparam[0].loopcount = 0;      
+      //SERIALPORT.print("IN: ");      
+      float seradc = g_pidparam[0].adcin;
+      float serdac = g_pidparam[0].dacout;      
+      byte * out1 = (byte *) &seradc;
+      byte * out2 = (byte *) &serdac;
+      //byte * b1 = (byte *) g_pidparam[0].adcin;      
+      SERIALPORT.write(out1,4);   
+      SERIALPORT.write(out2,4);
+      SERIALPORT.write(0xA5);
+      SERIALPORT.write(0x5A);
+
+    }
+    
   }
   
 
