@@ -46,11 +46,11 @@
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
-const int Noperations = 35;
+const int Noperations = 36;
 String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
 "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
 "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
-"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR"};
+"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR", "SET_PID_SLEW"};
 
 
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
@@ -136,12 +136,15 @@ typedef struct PIDparam
   uint32_t loopcount = 0;
   double adcin = 0.0;
   double dacout = 0.0;
+  double dacoutlim = 0.0;
   double setpoint = 0.0;
   double dacmin = -10000.0;
   double dacmax = 10000.0;
   double kp = 0.1;
   double ki = 1.0;
   double kd = 0.0;
+  double slewlimit = 10000000.0; //slew limit in mv/sec, make it big because it intereferes with the pid
+  double slewcycle = 4000.0; //slew limit in mv/cycle, default for 400us sampletime
 }PIDparam;
 
 PIDparam g_pidparam[MAXNUMPIDS];
@@ -465,6 +468,15 @@ void router(std::vector<String> DB)
 
     case 34://SET_PID_DIR
     set_pid_dir(DB);
+    break;
+
+    case 35://SET_PID_SLEW
+    if(DB.size() != 2)
+    {
+      SERIALPORT.println("SYNTAX ERROR");
+      break;
+    }
+    set_pid_slew(DB[1].toFloat());
     break;
     
     default:
@@ -820,11 +832,14 @@ void writetobuffer()
 //Start PID, currently DAC0 and ADC0, no inputs params, just starts
 void start_pid(std::vector<String> DB)
 {
-  g_pidparam[0].dacout = getDAC(0);//Start from current dac setpoint
+  g_pidparam[0].dacout = getDAC(g_pidparam[0].DACchan);//Start from current dac setpoint
+  g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
   
   g_pidparam[0].sampletime = readADCConversionTime(g_pidparam[0].ADCchan);//Get PID sample time in microsec from adc channel conversion time
   
   pid0.SetSampleTime(g_pidparam[0].sampletime);
+
+  set_pid_slew(g_pidparam[0].slewlimit);//has to occur after setting sample time
   
   if(g_pidparam[0].forward_dir == false)
   {
@@ -865,14 +880,26 @@ void pidint(void)
     
   if(pid0.Compute())
   {    
-    writeDAC(g_pidparam[0].DACchan, g_pidparam[0].dacout, true);
+    if(g_pidparam[0].dacout > (g_pidparam[0].dacoutlim + g_pidparam[0].slewcycle))
+    {
+      g_pidparam[0].dacoutlim += g_pidparam[0].slewcycle;
+    }
+    else if(g_pidparam[0].dacout < (g_pidparam[0].dacoutlim - g_pidparam[0].slewcycle))
+    {
+      g_pidparam[0].dacoutlim -= g_pidparam[0].slewcycle;
+    }
+    else 
+    {
+      g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
+    }
+    writeDAC(g_pidparam[0].DACchan, g_pidparam[0].dacoutlim, true);
     g_pidparam[0].loopcount++;
     if(g_pidparam[0].loopcount >= 10)
     {
       g_pidparam[0].loopcount = 0;      
       //SERIALPORT.print("IN: ");      
       float seradc = g_pidparam[0].adcin;
-      float serdac = g_pidparam[0].dacout;      
+      float serdac = g_pidparam[0].dacoutlim;      
       byte * out1 = (byte *) &seradc;
       byte * out2 = (byte *) &serdac;
       //byte * b1 = (byte *) g_pidparam[0].adcin;      
@@ -966,7 +993,17 @@ void set_pid_dir(std::vector<String> DB)
   }
 }
 
-
+//SET_PID_SLEW,<maximum slewrete in mV per second>
+void set_pid_slew(float slewlimit)
+{
+  if(slewlimit < 0)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }    
+  g_pidparam[0].slewlimit = slewlimit;
+  g_pidparam[0].slewcycle = (g_pidparam[0].slewlimit * g_pidparam[0].sampletime) / 1000000.0; //divide for microseconds
+}
 
 //////////////////////
 //// CALIBRATION ////
