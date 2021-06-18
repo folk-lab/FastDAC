@@ -73,3 +73,13 @@
 #define DAC_FUNC_D0DIR 0x04
 #define DAC_FUNC_D0VAL 0x02
 #define DAC_FUNC_SDODISABLE 0x01
+
+#define CHECK_CLOCK 0x1
+#define CHECK_SYNC 0x2
+
+#ifdef __arm__
+// should use uinstd.h to define sbrk but Due causes a conflict
+extern "C" char* sbrk(int incr);
+#else  // __ARM__
+extern char *__brkval;
+#endif  // __arm__
