@@ -16,11 +16,11 @@ import time
 import dash_table
 import pandas as pd
 import warnings
-#warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
+warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
 
 def PSD(port, duration, channels=[0, ]):
 
-    fd = FD.FastDAC(port, baudrate=1750000, timeout=1, verbose=False)        # Optical cable
+    fd = FD.FastDAC(port, baudrate=1750000, timeout=1, verbose=False)               # Optical cable
     #fd = FD.FastDAC('COM6', baudrate=57600, timeout=1, verbose=False)             # USB
     FastDAC_ID = fd.IDN()
 
@@ -86,52 +86,14 @@ df = df.append(data, ignore_index=True)
 app = dash.Dash(__name__)
 app.layout = html.Div([
 
-    html.Div([dcc.Graph(id="live-graph", animate=True)], style={'width': '150%', 'height':'150%'}),
-    dcc.Interval(id="graph-update", interval=2000, n_intervals=0),
+    
     html.Div([
-        dcc.Dropdown(
-            id='avg-dropdown', 
-            options=[
-                {'label': '1', 'value': 1},
-                {'label': '2', 'value': 2},
-                {'label': '3', 'value': 3},
-                {'label': '4', 'value': 4},
-                {'label': '5', 'value': 5},
-                {'label': '6', 'value': 6}],
-            value=3)
-            ], 
-            style={'width': '15%','display': 'inline-block', "margin-left": "30px"}),
+
+        html.Div([dcc.Graph(id="live-graph", animate=True)], style={'width': '150%', 'height':'150%'}),
+        dcc.Interval(id="graph-update", interval=2000, n_intervals=0) ]),
 
     html.Div([
-        dcc.Checklist(
-            id='channels-checklist', 
-            options=[
-                {'label': 'Ch.0', 'value': 0},
-                {'label': 'Ch.1', 'value': 1},
-                {'label': 'Ch.2', 'value': 2},
-                {'label': 'Ch.3', 'value': 3}],
-            value=[0],
-            labelStyle={'display': 'inline-block'})
-            ], 
-            style={'width': '20%','display': 'inline-block',"margin-left": "30px"}),
 
-    html.Div([
-        dcc.Textarea(
-            id='enter-port', 
-            value='COM5', style={'width': '60%'}),
-            html.Button('OK', id='enter-port-button', n_clicks=0)
-            ], 
-            style={'width': '10%','display': 'inline-block', "margin-left": "30px"}),
-
-    html.Div([
-        dcc.Textarea(
-            id='enter-duration', 
-            value='1', style={'width': '50%'}),
-            html.Button('OK', id='enter-duration-button', n_clicks=0)
-            ], 
-            style={'width': '10%','display': 'inline-block', "margin-left": "30px"}),
-        
-    html.Div([
         dash_table.DataTable(
             id='table', 
             columns=[{'name': 'FastDAC ID', 'id': 'col1'},
@@ -139,13 +101,57 @@ app.layout = html.Div([
                     {'name': 'Run time', 'id': 'col3'},
                     {'name': 'Channels', 'id': 'col4'}],
             data=df.to_dict('records'),
-            #fill_width=False,
             style_cell={'textAlign': 'left', "margin-left": "30px"},
+            style_table = {'width':'40%', "margin-bottom":"30px"},
             style_header={
                 'backgroundColor': 'rgb(230, 230, 230)',
-                'fontWeight': 'bold'})
-                ], 
-            style={'width': '40%', "margin-left": "30px"})
+                'fontWeight': 'bold'}),
+
+        html.Div([
+        html.Label(['Port:'], style={'font-weight': 'bold', "text-align": "right","offset":1}),
+        dcc.Input(id='enter-port', type='text',value='COM5', style={'width': '20%', 'height':'50%', 'display': 'inline-block'}),
+        html.Button('OK', id='enter-port-button', n_clicks=0, style={"margin-bottom": "10px"}),
+        ]),
+
+        html.Div([
+        html.Label(['Duration (s):'], style={'font-weight': 'bold', "text-align": "right","offset":0}),
+        dcc.Input(id='enter-duration', type = 'text',value='1', style={'width': '10%', "margin-bottom": "10px"}),
+        html.Button('OK', id='enter-duration-button', n_clicks=0),
+        ]),
+
+        html.Div([
+        html.Label(['Channels:'], style={'font-weight': 'bold', "text-align": "right","offset":0}),
+        dcc.Checklist(id='channels-checklist', 
+                options=[
+                    {'label': '0', 'value': 0},
+                    {'label': '1', 'value': 1},
+                    {'label': '2', 'value': 2},
+                    {'label': '3', 'value': 3}], value=[0], style={"margin-bottom": "10px"}),
+        ]),
+
+        html.Div([
+        html.Label(['Average over ______ cycles:'], style={'font-weight': 'bold', "text-align": "right","offset":0}),
+        dcc.Dropdown(
+                id='avg-dropdown', 
+                options=[
+                    {'label': '1', 'value': 1},
+                    {'label': '2', 'value': 2},
+                    {'label': '3', 'value': 3},
+                    {'label': '4', 'value': 4},
+                    {'label': '5', 'value': 5},
+                    {'label': '6', 'value': 6}], value=5, style={'width':'10%', "margin-bottom": "10px"}),
+        ]),
+
+        html.Div([
+        html.Label(['Axis:'], style={'font-weight': 'bold', "text-align": "right","offset":0}),
+        dcc.Dropdown(
+                id='axes-dropdown', 
+                options=[
+                    {'label': 'Log', 'value': 'log'},
+                    {'label': 'Linear', 'value': 'linear'}], value='log', style={'width':'50%', "margin-bottom": "10px"}),
+        ]),
+
+        ], style = {'display': 'inline-block', 'margin-left': '15px', 'border': '2px green solid'})
     ])
 
 @app.callback(
@@ -153,6 +159,7 @@ app.layout = html.Div([
     Output(component_id='table', component_property='data'),
     [Input(component_id='graph-update', component_property='n_intervals'),
     Input(component_id='avg-dropdown', component_property='value'),
+    Input(component_id='axes-dropdown', component_property='value'),
     Input(component_id='channels-checklist', component_property='value'),
     Input(component_id='enter-port-button', component_property='n_clicks'),
     Input(component_id='enter-duration-button', component_property='n_clicks'),
@@ -161,7 +168,7 @@ app.layout = html.Div([
     ])
 
 
-def update_graph(input_data, selected_avg, channel_arr, n_clicks1, n_clicks2, port, dur):
+def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1, n_clicks2, port, dur):
 
     changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
@@ -173,9 +180,9 @@ def update_graph(input_data, selected_avg, channel_arr, n_clicks1, n_clicks2, po
     
     psd = PSD(str(PORT[-1]), float(DUR[-1]), channel_arr)
 
-    fig = make_subplots(rows=2, cols=2)
+    fig = make_subplots(rows=[1,2,2,2][len(channel_arr)-1], cols=[1,1,2,2][len(channel_arr)-1])
     fig.update_layout(height=600, width=1000, title_text="FastDAC PSD", legend_title = "channels")
-    fig.update_yaxes(type='log', title_text='Potential [mV]')
+    fig.update_yaxes(type=selected_axes, title_text='Potential [mV]')
     fig.update_xaxes(title_text='Frequency [Hz]')
     fig.update_layout(showlegend=False)
 
@@ -184,8 +191,8 @@ def update_graph(input_data, selected_avg, channel_arr, n_clicks1, n_clicks2, po
         Y[k].append(psd[1][k][0])
         
         if len(X[k])<selected_avg:
-            xnew=np.mean(X[k], axis=0)
-            ynew=np.mean(Y[k], axis=0)
+            xnew=np.mean(X[k][-len(X[k]):-1], axis=0)
+            ynew=np.mean(Y[k][-len(X[k]):-1], axis=0)
 
         elif selected_avg==1:
             xnew=psd[0][k][0]
@@ -193,14 +200,12 @@ def update_graph(input_data, selected_avg, channel_arr, n_clicks1, n_clicks2, po
             
         else:
             xnew=np.mean(X[k][-selected_avg:-1], axis=0)
-            #print(len(xnew))
             ynew=np.mean(Y[k][-selected_avg:-1], axis=0)
-            #print(len(ynew))
 
         fig.add_trace(
             go.Scatter(
-                x=xnew[20:], 
-                y=ynew[20:], 
+                x=xnew[15:], 
+                y=ynew[15:], 
                 name=str(channel_arr[k])), 
                 row=[1,2,1,2][k],
                 col=[1,1,2,2][k])
