@@ -1,3 +1,22 @@
+
+import time
+import serial
+import numpy as np
+from serial.serialutil import EIGHTBITS
+import time
+from scipy.fftpack import fft, fftfreq
+from scipy import signal
+import plotly
+from plotly.subplots import make_subplots
+import plotly.graph_objects as go
+import plotly.express as px
+import time
+import struct
+import FastDAC as FD
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+from dash.dependencies import Input, Output
 from scipy import signal
 import plotly
 from plotly.subplots import make_subplots
@@ -20,49 +39,63 @@ warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
 
 def PSD(port, duration, channels=[0, ]):
 
-    fd = FD.FastDAC(port, baudrate=1750000, timeout=1, verbose=False)               # Optical cable
-    #fd = FD.FastDAC('COM6', baudrate=57600, timeout=1, verbose=False)             # USB
-    FastDAC_ID = fd.IDN()
+    s = serial.Serial(port, 1750000, timeout=1)
+    s.reset_input_buffer()
+    s.reset_output_buffer()
+    s.read_all()
+
+    def Query(command):
+
+        if not s.is_open:
+            s.open()
+        s.write(command)
+        data = s.readline()
+        data = data.decode('ascii', errors='ignore').rstrip('\r\n')
+        s.close()
+        return data
+
+    FastDAC_ID = Query(b"*IDN?\r")
 
     ts = time.time()
     xper = []
     yper = []
-        
-    c_time = list()
+
+    convert_time = list()
     for c in channels:
-        t_read = int(fd.READ_CONVERT_TIME(channel=c))
-        if t_read not in c_time:
-            c_time.append(t_read)
+        cmd = bytes("READ_CONVERT_TIME,{}\r".format(c), 'ascii')
+        read_time_bytes = Query(cmd)
+        read_time = int(read_time_bytes)
 
-    #assert len(c_time) == 1
+        if read_time not in convert_time:
+            convert_time.append(read_time)
 
-    c_freq = 1/(c_time[0]*10**-6)  # Hz
+    assert len(convert_time) == 1
+
+    c_freq = 1/(convert_time[0]*10**-6)  # Hz
     measure_freq = c_freq/len(channels)
     num_bytes = int(np.round(measure_freq*duration))
 
-    cmd = "SPEC_ANA,{},{}\r".format("".join(str(ac) for ac in channels), num_bytes)
+    cmd = "SPEC_ANA,{},{}\r".format("".join(str(ch) for ch in channels), num_bytes)
 
-    if not fd.ser.is_open:
-        fd.ser.open()
+    if not s.is_open:
+        s.open()
+    s.write(bytes(cmd,'ascii'))
 
-    fd.ser.write(bytes(cmd, "ascii"))
     channel_readings = {ac: list() for ac in channels}
     voltage_readings = []
-
     try:
-        while fd.ser.in_waiting > 24 or len(voltage_readings) <= num_bytes/2:
-            buffer = fd.ser.read(24)
+        while s.in_waiting > 24 or len(voltage_readings) <= num_bytes/2:
+            buffer = s.read(24)
             info = [buffer[i:i+2] for i in range(0, len(buffer), 2)]
-            for two_b in info:
-                int_val = fd.two_bytes_to_int(two_b)
-                voltage_reading = fd.map_int16_to_mV(int_val)
+            for two_bytes in info:
+                int_val = int.from_bytes(two_bytes, 'big')
+                voltage_reading = (int_val - 0) * (20000.0) / (65536.0) - 10000.0
                 voltage_readings.append(voltage_reading)
-
     except:
-        fd.ser.close()
+        s.close()
         raise
 
-    fd.ser.close()
+    s.close()
 
     for k in range(0, len(channels)):
         channel_readings[k] = voltage_readings[k::len(channels)]
@@ -73,6 +106,7 @@ def PSD(port, duration, channels=[0, ]):
         yper.append([Pxx_den])
 
     return xper, yper, str(num_bytes), str(time.time() - ts), FastDAC_ID
+
 
 X = [[],[],[],[]]
 Y = [[],[],[],[]]
@@ -219,4 +253,7 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
     return fig, df.to_dict('records')
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
+
+
+
