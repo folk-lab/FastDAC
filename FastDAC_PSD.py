@@ -96,11 +96,14 @@ data  = {'col1':'-', 'col2':'-', 'col3':'-', 'col4':'-'}
 df = df.append(data, ignore_index=True)
 
 app = dash.Dash(__name__)
+
 app.layout = html.Div([
-    
+
     html.Div([
 
-        html.Div([dcc.Graph(id="live-graph", animate=True)], style={'width': '50%', 'height':'100%'}),
+        html.Div([dcc.Graph(id="live-graph", animate=True)], 
+        
+            style={'width': '50%', 'height':'100%', 'margin-left': '15px', 'margin-top': '15px', 'margin-bottom': '15px', 'border': '3px black solid'}),
         dcc.Interval(id="graph-update", interval=2000, n_intervals=0) ]),
 
     html.Div([
@@ -113,7 +116,7 @@ app.layout = html.Div([
                     {'name': 'Channels', 'id': 'col4'}],
             data=df.to_dict('records'),
             style_cell={'textAlign': 'left', "margin-left": "30px"},
-            style_table = {'width':'40%', "margin-bottom":"30px"},
+            style_table = {'width':'40%', "margin-bottom":"30px", 'margin-top':'15px', 'margin-left':'15px'},
             style_header={
                 'backgroundColor': 'rgb(230, 230, 230)',
                 'fontWeight': 'bold'}),
@@ -127,7 +130,7 @@ app.layout = html.Div([
         html.Div([ 
         html.Label('FastDAC ID = ', style={"margin-bottom": "10px", "text-align": "right","offset":0}),
         html.Label(children=str(df.to_dict('records')[0]['col1']), id = 'label'),
-        ], style = {'display': 'inline-block'}),
+        ], style = {'display': 'inline-block', 'margin-right': '15px'}),
 
 
         html.Div([
@@ -161,7 +164,7 @@ app.layout = html.Div([
                     {'label': 'Average over 5 cycles:', 'value': 5},
                     {'label': 'Average over 6 cycles:', 'value': 6}],
                 value=5,
-                style={'width':'75%', "margin-bottom": "10px", 'margin-left': '10px'}),
+                style={'width':'75%', "margin-bottom": "15px", 'margin-left': '10px'}),
         ]),
 
         html.Div([
@@ -171,11 +174,11 @@ app.layout = html.Div([
                     {'label': 'Log Axis', 'value': 'log'},
                     {'label': 'Linear Axis', 'value': 'linear'}], 
                 value='log', 
-                style={'width':'75%', "margin-bottom": "10px", 'margin-left': '10px'}),
+                style={'width':'75%', "margin-bottom": "15px", 'margin-left': '10px'}),
         ]),
 
-        ], style = {'display': 'inline-block', 'margin-left': '15px', 'border': '2px green solid'})
-    ], style={'width':'150%'})
+        ], style = {'display': 'inline-block', 'border': '3px black solid', 'margin-left':'15px'})
+    ], style={'backgroundColor':'grey'})
 
 @app.callback(
     Output(component_id='live-graph', component_property='figure'),
@@ -206,7 +209,7 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
     psd = PSD(str(PORT[-1]), float(DUR[-1]), channel_arr)
 
     fig = make_subplots(rows=[1,2,2,2][len(channel_arr)-1], cols=[1,1,2,2][len(channel_arr)-1])
-    fig.update_layout(height=600, width=1000, title_text="FastDAC PSD", legend_title = "channels")
+    fig.update_layout(title_text="FastDAC PSD", legend_title = "channels")
     fig.update_yaxes(type=selected_axes, title_text='Potential [mV]')
     fig.update_xaxes(title_text='Frequency [Hz]')
     fig.update_layout(showlegend=False)
@@ -245,6 +248,3 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
 
 if __name__ == '__main__':
     app.run_server(debug=True)
-
-
-
