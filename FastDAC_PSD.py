@@ -102,43 +102,21 @@ app.layout = html.Div([
     html.Div([
 
         html.Div([dcc.Graph(id="live-graph", animate=True)], 
-        
-            style={'width': '50%', 'height':'100%', 'margin-left': '15px', 'margin-top': '15px', 'margin-bottom': '15px', 'border': '3px black solid'}),
+        style={'width': '50%', 'height':'100%', 'margin-left': '15px', 'margin-top': '15px', 'margin-bottom': '15px', 'border': '3px black solid'}),
         dcc.Interval(id="graph-update", interval=2000, n_intervals=0) ]),
 
     html.Div([
 
-        dash_table.DataTable(
-            id='table', 
-            columns=[{'name': 'FastDAC ID', 'id': 'col1'},
-                    {'name': 'Bytes/channel', 'id': 'col2'},
-                    {'name': 'Run time', 'id': 'col3'},
-                    {'name': 'Channels', 'id': 'col4'}],
-            data=df.to_dict('records'),
-            style_cell={'textAlign': 'left', "margin-left": "30px"},
-            style_table = {'width':'40%', "margin-bottom":"30px", 'margin-top':'15px', 'margin-left':'15px'},
-            style_header={
-                'backgroundColor': 'rgb(230, 230, 230)',
-                'fontWeight': 'bold'}),
-
         html.Div([ 
-        html.Label(['Port: '], style={'font-weight': 'bold', 'margin-left': '15px',"text-align": "right","offset":0}),
-        dcc.Input(id='enter-port', type='text', value='COM5', style={'width': '40%', 'height':'50%'}),
+        html.Label(['Port:'], style={'font-weight': 'bold', 'margin-left': '15px','margin-right':'56px'}),
+        dcc.Input(id='enter-port', type='text', value='COM5', style={'width': '50%', 'height':'50%'}),
         html.Button('OK', id='enter-port-button', n_clicks=0, style={"margin-bottom": "10px"}),
-        ], style = {'display': 'inline-block'}),
-
-        html.Div([ 
-        html.Label('FastDAC ID = ', style={"margin-bottom": "10px", "text-align": "right","offset":0}),
-        html.Label(children=str(df.to_dict('records')[0]['col1']), id = 'label'),
-        ], style = {'display': 'inline-block', 'margin-right': '15px'}),
-
+        ], style={'margin-top':'15px'}),
 
         html.Div([
         html.Label(children=['Duration (s): '], style={'font-weight': 'bold', "text-align": "right","offset":0, 'margin-left': '15px'}),
-        dcc.Input(id='enter-duration', type = 'text',value='1', style={'width': '9%', "margin-bottom": "10px"}),
+        dcc.Input(id='enter-duration', type = 'text',value='1', style={'width': '50%', "margin-bottom": "10px"}),
         html.Button('OK', id='enter-duration-button', n_clicks=0),
-        html.Label('Runtime (s) = ', style={"margin-bottom": "10px", "text-align": "right","offset":0, 'margin-left': '65px'}),
-        html.Label(children=str(df.to_dict('records')[0]['col3']), id = 'label2'),
         ]),
 
         html.Div([
@@ -164,7 +142,7 @@ app.layout = html.Div([
                     {'label': 'Average over 5 cycles:', 'value': 5},
                     {'label': 'Average over 6 cycles:', 'value': 6}],
                 value=5,
-                style={'width':'75%', "margin-bottom": "15px", 'margin-left': '10px'}),
+                style={'width':'80%', "margin-bottom": "15px", 'margin-left': '10px'}),
         ]),
 
         html.Div([
@@ -174,15 +152,24 @@ app.layout = html.Div([
                     {'label': 'Log Axis', 'value': 'log'},
                     {'label': 'Linear Axis', 'value': 'linear'}], 
                 value='log', 
-                style={'width':'75%', "margin-bottom": "15px", 'margin-left': '10px'}),
+                style={'width':'80%', "margin-bottom": "15px", 'margin-left': '10px'}),
         ]),
 
-        ], style = {'display': 'inline-block', 'border': '3px black solid', 'margin-left':'15px'})
-    ], style={'backgroundColor':'grey'})
+        ], style = {'width':'30%','border': '3px black solid', 'margin-left':'15px', 'display': 'inline-block'}),
+
+        html.Div([
+            
+            html.Div([html.Label('FastDAC ID = '),
+                        html.Label(children=str(df.to_dict('records')[0]['col1']), id = 'label')], style={"margin-top": "15px", "margin-left": "15px", "margin-right": "15px"}),
+            html.Div([html.Label('Runtime (s) = '),
+                html.Label(children=str(df.to_dict('records')[0]['col3']), id = 'label2')], style={"margin-top": "15px",  "margin-bottom": "15px", "margin-left": "15px", "margin-right": "15px"}),
+
+            ], style={'border': '3px black solid', 'display': 'inline-block', 'margin-left':'15px', 'margin-top':'15px', 'height':'200px', 'width':'200px'})
+
+    ], style={'backgroundColor':'white'})
 
 @app.callback(
     Output(component_id='live-graph', component_property='figure'),
-    Output(component_id='table', component_property='data'),
     Output(component_id = 'label', component_property='children'),
     Output(component_id = 'label2', component_property='children'),
     [Input(component_id='graph-update', component_property='n_intervals'),
@@ -248,3 +235,6 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
 
 if __name__ == '__main__':
     app.run_server(debug=True)
+
+
+
