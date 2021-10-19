@@ -10,9 +10,10 @@ import dash
 import dash_core_components as dcc
 import dash_html_components as html
 from dash.dependencies import Input, Output, State
-import dash_table
+from dash_extensions import Download
+from dash_extensions.snippets import send_file
 import pandas as pd
-import warnings
+#import warnings
 #warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
 
 def PSD(port, duration, channels=[0, ]):
@@ -95,15 +96,29 @@ df = pd.DataFrame()
 data  = {'col1':'-', 'col2':'-', 'col3':'-', 'col4':'-'}
 df = df.append(data, ignore_index=True)
 
-app = dash.Dash(__name__)
+
+app = dash.Dash(__name__) #, external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css'],update_title='Loading...')
+app.scripts.config.serve_locally = True
 
 app.layout = html.Div([
 
     html.Div([
 
-        html.Div([dcc.Graph(id="live-graph", animate=True)], 
-        style={'width': '50%', 'height':'100%', 'margin-left': '15px', 'margin-top': '15px', 'margin-bottom': '15px', 'border': '3px black solid'}),
-        dcc.Interval(id="graph-update", interval=2000, n_intervals=0) ]),
+        html.Div([
+            dcc.Graph(id="live-graph", animate=True)
+            ], style={'width': '50%', 
+            'height':'100%', 
+            'margin-left': '15px', 
+            'margin-top': '15px', 
+            'margin-bottom': '15px', 
+            'border': '3px black solid'}
+            ),
+
+            html.Button("Download Image", id="btn_image", 
+            style={'margin-left': '15px',
+            'margin-top':'15px',
+            'margin-bottom':'15px'}), dcc.Download(id="download-image")
+            ]),
 
     html.Div([
 
@@ -146,7 +161,7 @@ app.layout = html.Div([
         ]),
 
         html.Div([
-        dcc.Dropdown(
+            dcc.Dropdown(
                 id='axes-dropdown', 
                 options=[
                     {'label': 'Log Axis', 'value': 'log'},
@@ -155,18 +170,42 @@ app.layout = html.Div([
                 style={'width':'80%', "margin-bottom": "15px", 'margin-left': '10px'}),
         ]),
 
-        ], style = {'width':'30%','border': '3px black solid', 'margin-left':'15px', 'display': 'inline-block'}),
+        ], style = {'width':'25%',
+            'border': '3px black solid', 
+            'backgroundColor':'white',
+            'margin-left':'15px', 
+            'display': 'inline-block'}),
 
         html.Div([
             
-            html.Div([html.Label('FastDAC ID = '),
-                        html.Label(children=str(df.to_dict('records')[0]['col1']), id = 'label')], style={"margin-top": "15px", "margin-left": "15px", "margin-right": "15px"}),
-            html.Div([html.Label('Runtime (s) = '),
-                html.Label(children=str(df.to_dict('records')[0]['col3']), id = 'label2')], style={"margin-top": "15px",  "margin-bottom": "15px", "margin-left": "15px", "margin-right": "15px"}),
+            html.Div([html.Label('FastDAC ID: ', style={'font-weight': 'bold', 'margin-right':'10px'}),
+                    html.Label(children=str(df.to_dict('records')[0]['col1']), id = 'label')], 
+                    style={"margin-top": "15px", 
+                    "margin-left": "15px", 
+                    "margin-right": "15px"}),
 
-            ], style={'border': '3px black solid', 'display': 'inline-block', 'margin-left':'15px', 'margin-top':'15px', 'height':'200px', 'width':'200px'})
+            html.Div([html.Label('Runtime (s): ', style={'font-weight': 'bold', 'margin-right':'15px'}),
+                html.Label(children=str(df.to_dict('records')[0]['col3']), id = 'label2')], 
+                style={
+                    "margin-top": "15px",  
+                    "margin-bottom": "15px", 
+                    "margin-left": "15px", 
+                    "margin-right": "15px"}),
 
-    ], style={'backgroundColor':'white'})
+            ], style={'vertical-align':'top',
+                'border': '3px black solid', 
+                'backgroundColor':'white',
+                'display': 'inline-block', 
+                'margin-left':'15px', 
+                'margin-top':'0px', 
+                'height':'207px', 
+                'width':'335px'})
+
+    ], style={'backgroundColor':'#BFBAB9', 
+        'padding-top':'1%', 
+        'padding-bottom':'10%',
+        'padding-right':'0%',
+        'padding-left':'0%'})
 
 @app.callback(
     Output(component_id='live-graph', component_property='figure'),
@@ -178,12 +217,12 @@ app.layout = html.Div([
     Input(component_id='channels-checklist', component_property='value'),
     Input(component_id='enter-port-button', component_property='n_clicks'),
     Input(component_id='enter-duration-button', component_property='n_clicks'),
+    Input("btn_image", "n_clicks"),
     State(component_id='enter-port', component_property='value'),
-    State(component_id='enter-duration', component_property='value')
-    ])
+    State(component_id='enter-duration', component_property='value')]
+    )
 
-
-def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1, n_clicks2, port, dur):
+def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1, n_clicks2, n_clicks3, port, dur):
 
     changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
@@ -227,6 +266,9 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
 
     #fig.update_layout(showlegend=True)
 
+    if 'btn_image' in changed_id:
+        dcc.send_file("./DASH.png")
+
     
     df = pd.DataFrame()
     data={'col1':psd[4], 'col2':psd[2], 'col3':str(round(float(psd[3]), 2)), 'col4':str(channel_arr)}
@@ -235,6 +277,5 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
 
 if __name__ == '__main__':
     app.run_server(debug=True)
-
 
 
