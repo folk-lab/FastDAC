@@ -1,3 +1,4 @@
+# find port name by typing "ls /dev/tty.usb*" in terminal
 
 import time
 import serial
@@ -11,7 +12,7 @@ import dash_core_components as dcc
 import dash_html_components as html
 from dash.dependencies import Input, Output, State
 from dash_extensions import Download
-from dash_extensions.snippets import send_file
+#from dash_extensions.snippets import send_file
 import pandas as pd
 #import warnings
 #warnings.filterwarnings("ignore", category=np.VisibleDeprecationWarning)
@@ -48,7 +49,7 @@ def PSD(port, duration, channels=[0, ]):
         if read_time not in convert_time:
             convert_time.append(read_time)
 
-    assert len(convert_time) == 1
+    #assert len(convert_time) == 1
 
     c_freq = 1/(convert_time[0]*10**-6)  # Hz
     measure_freq = c_freq/len(channels)
@@ -89,16 +90,11 @@ def PSD(port, duration, channels=[0, ]):
 
 X = [[],[],[],[]]
 Y = [[],[],[],[]]
-PORT = [0,'COM5']
+PORT = [0,'COM4']
 DUR = [0,1]
 
-df = pd.DataFrame()
-data  = {'col1':'-', 'col2':'-', 'col3':'-', 'col4':'-'}
-df = df.append(data, ignore_index=True)
-
-
-app = dash.Dash(__name__) #, external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css'],update_title='Loading...')
-app.scripts.config.serve_locally = True
+app = dash.Dash(__name__, title='FastDAC Spectrum Analyzer', update_title='Loading...')
+#app.scripts.config.serve_locally = True
 
 app.layout = html.Div([
 
@@ -106,7 +102,7 @@ app.layout = html.Div([
 
         html.Div([
             dcc.Graph(id="live-graph", animate=True)
-            ], style={'width': '50%', 
+            ], style={'width': '75%', 
             'height':'100%', 
             'margin-left': '15px', 
             'margin-top': '15px', 
@@ -114,23 +110,19 @@ app.layout = html.Div([
             'border': '3px black solid'}
             ),
 
-            html.Button("Download Image", id="btn_image", 
-            style={'margin-left': '15px',
-            'margin-top':'15px',
-            'margin-bottom':'15px'}), dcc.Download(id="download-image")
-            ]),
+            dcc.Interval(id="graph-update", interval=1500, n_intervals=0)]),
 
     html.Div([
 
         html.Div([ 
         html.Label(['Port:'], style={'font-weight': 'bold', 'margin-left': '15px','margin-right':'56px'}),
-        dcc.Input(id='enter-port', type='text', value='COM5', style={'width': '50%', 'height':'50%'}),
+        dcc.Input(id='enter-port', type='text', value=str(PORT[-1]), style={'width': '40%', 'height':'50%'}),
         html.Button('OK', id='enter-port-button', n_clicks=0, style={"margin-bottom": "10px"}),
         ], style={'margin-top':'15px'}),
 
         html.Div([
         html.Label(children=['Duration (s): '], style={'font-weight': 'bold', "text-align": "right","offset":0, 'margin-left': '15px'}),
-        dcc.Input(id='enter-duration', type = 'text',value='1', style={'width': '50%', "margin-bottom": "10px"}),
+        dcc.Input(id='enter-duration', type = 'text',value=str(DUR[-1]), style={'width': '40%', "margin-bottom": "10px"}),
         html.Button('OK', id='enter-duration-button', n_clicks=0),
         ]),
 
@@ -143,7 +135,7 @@ app.layout = html.Div([
                     {'label': '2', 'value': 2},
                     {'label': '3', 'value': 3}], 
                 value=[0],
-                style={"margin-bottom": "10px", 'display': 'inline-block', 'margin-left': '15px'}),
+                style={"margin-bottom": "10px", 'display': 'inline-block','margin-left': '15px','margin-right': '10px'}),
         ]),
 
         html.Div([
@@ -157,7 +149,7 @@ app.layout = html.Div([
                     {'label': 'Average over 5 cycles:', 'value': 5},
                     {'label': 'Average over 6 cycles:', 'value': 6}],
                 value=5,
-                style={'width':'80%', "margin-bottom": "15px", 'margin-left': '10px'}),
+                style={ "margin-bottom": "15px", 'width':'90%','margin-left': '10px','margin-right': '10px'}),
         ]),
 
         html.Div([
@@ -167,10 +159,11 @@ app.layout = html.Div([
                     {'label': 'Log Axis', 'value': 'log'},
                     {'label': 'Linear Axis', 'value': 'linear'}], 
                 value='log', 
-                style={'width':'80%', "margin-bottom": "15px", 'margin-left': '10px'}),
+                style={ "margin-bottom": "15px", 'margin-left': '10px','margin-right': '10px',  'width':'90%'}),
         ]),
 
         ], style = {'width':'25%',
+            'height':'25%',
             'border': '3px black solid', 
             'backgroundColor':'white',
             'margin-left':'15px', 
@@ -179,50 +172,57 @@ app.layout = html.Div([
         html.Div([
             
             html.Div([html.Label('FastDAC ID: ', style={'font-weight': 'bold', 'margin-right':'10px'}),
-                    html.Label(children=str(df.to_dict('records')[0]['col1']), id = 'label')], 
+                    html.Label(children='-', id = 'label1')], 
                     style={"margin-top": "15px", 
                     "margin-left": "15px", 
                     "margin-right": "15px"}),
 
             html.Div([html.Label('Runtime (s): ', style={'font-weight': 'bold', 'margin-right':'15px'}),
-                html.Label(children=str(df.to_dict('records')[0]['col3']), id = 'label2')], 
+                html.Label(children='-', id = 'label2')], 
                 style={
                     "margin-top": "15px",  
                     "margin-bottom": "15px", 
                     "margin-left": "15px", 
                     "margin-right": "15px"}),
 
-            ], style={'vertical-align':'top',
+            html.Div([html.Label('bytes / s: ', style={'font-weight': 'bold', 'margin-right':'40px'}),
+                html.Label(children='-', id = 'label3')], 
+                style={
+                    "margin-top": "15px",  
+                    "margin-bottom": "15px", 
+                    "margin-left": "15px", 
+                    "margin-right": "15px"}),
+
+            ], style={'vertical-align':'top', 
                 'border': '3px black solid', 
                 'backgroundColor':'white',
                 'display': 'inline-block', 
                 'margin-left':'15px', 
-                'margin-top':'0px', 
-                'height':'207px', 
-                'width':'335px'})
+                'height':'35%', 
+                'width':'48.5%'})
 
     ], style={'backgroundColor':'#BFBAB9', 
         'padding-top':'1%', 
-        'padding-bottom':'10%',
+        'padding-bottom':'50%',
         'padding-right':'0%',
         'padding-left':'0%'})
 
 @app.callback(
     Output(component_id='live-graph', component_property='figure'),
-    Output(component_id = 'label', component_property='children'),
+    Output(component_id = 'label1', component_property='children'),
     Output(component_id = 'label2', component_property='children'),
+    Output(component_id = 'label3', component_property='children'),
     [Input(component_id='graph-update', component_property='n_intervals'),
     Input(component_id='avg-dropdown', component_property='value'),
     Input(component_id='axes-dropdown', component_property='value'),
     Input(component_id='channels-checklist', component_property='value'),
     Input(component_id='enter-port-button', component_property='n_clicks'),
     Input(component_id='enter-duration-button', component_property='n_clicks'),
-    Input("btn_image", "n_clicks"),
     State(component_id='enter-port', component_property='value'),
     State(component_id='enter-duration', component_property='value')]
     )
 
-def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1, n_clicks2, n_clicks3, port, dur):
+def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1, n_clicks2, port, dur):
 
     changed_id = [p['prop_id'] for p in dash.callback_context.triggered][0]
 
@@ -231,11 +231,14 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
         
     if 'enter-dur-button' in changed_id:
         DUR.append(dur)
+
+    #print(dur)
+    #print(DUR[-1])
     
     psd = PSD(str(PORT[-1]), float(DUR[-1]), channel_arr)
 
     fig = make_subplots(rows=[1,2,2,2][len(channel_arr)-1], cols=[1,1,2,2][len(channel_arr)-1])
-    fig.update_layout(title_text="FastDAC PSD", legend_title = "channels")
+    fig.update_layout(title_text="FastDAC Spectrum Analyzer", title_x=0.5, legend_title = "channels")
     fig.update_yaxes(type=selected_axes, title_text='Potential [mV]')
     fig.update_xaxes(title_text='Frequency [Hz]')
     fig.update_layout(showlegend=False)
@@ -264,18 +267,10 @@ def update_graph(input_data, selected_avg, selected_axes, channel_arr, n_clicks1
                 row=[1,2,1,2][k],
                 col=[1,1,2,2][k])
 
-    #fig.update_layout(showlegend=True)
+    #if 'btn_image' in changed_id:
+    #    dcc.send_file("./DASH.png")
 
-    if 'btn_image' in changed_id:
-        dcc.send_file("./DASH.png")
-
-    
-    df = pd.DataFrame()
-    data={'col1':psd[4], 'col2':psd[2], 'col3':str(round(float(psd[3]), 2)), 'col4':str(channel_arr)}
-    df = df.append(data, ignore_index=True)
-    return fig, df.to_dict('records'), psd[4], str(round(float(psd[3]), 2))
+    return fig, psd[4], psd[3], psd[2]
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
-
-
+     app.run_server(host= '0.0.0.0', debug=False)
