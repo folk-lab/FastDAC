@@ -17,6 +17,7 @@
 
 #include "SPI.h" // necessary library for SPI communication
 
+#include "src/PID/PID_v1.h" // Our own 'fork' of https://github.com/br3ttb/Arduino-PID-Library/
 #include <vector>
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
@@ -25,6 +26,8 @@
 
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
+
+#define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
 
 #define USBBUFFSIZE 300// works up to 450, but at some value higher than that the behaviour is to wait and send >2000 byte packets. Don't know why. Not used with optical comms
 
@@ -42,6 +45,13 @@
 #endif
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
+
+const int Noperations = 36;
+String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
+"READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
+"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
+"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR", "SET_PID_SLEW"};
+
 
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
@@ -70,10 +80,6 @@ const int drdy=48; // Data is ready pin on ADC
 const int led = 28;
 const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
 const int err=35;
-const int Noperations = 29;
-String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
-"READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
-"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP"};
 
 float DAC_FULL_SCALE = 10.0;
 
@@ -112,7 +118,6 @@ typedef struct AWGwave
 
 AWGwave g_awgwave[AWGMAXWAVES];
 
-
 volatile uint8_t g_numwaves;
 
 volatile uint32_t g_numloops;
@@ -120,10 +125,35 @@ volatile uint32_t g_loopcount;
 
 volatile bool g_nextloop = false;
 
+//PID Specific
+typedef struct PIDparam
+{
+  bool active = false;
+  bool forward_dir = true;
+  uint8_t ADCchan = 0;
+  uint8_t DACchan = 0;
+  uint16_t sampletime = 10;
+  uint32_t loopcount = 0;
+  double adcin = 0.0;
+  double dacout = 0.0;
+  double dacoutlim = 0.0;
+  double setpoint = 0.0;
+  double dacmin = -10000.0;
+  double dacmax = 10000.0;
+  double kp = 0.1;
+  double ki = 1.0;
+  double kd = 0.0;
+  double slewlimit = 10000000.0; //slew limit in mv/sec, make it big because it intereferes with the pid
+  double slewcycle = 4000.0; //slew limit in mv/cycle, default for 400us sampletime
+}PIDparam;
+
+PIDparam g_pidparam[MAXNUMPIDS];
+
+PID pid0(&(g_pidparam[0].adcin), &(g_pidparam[0].dacout), &(g_pidparam[0].setpoint), g_pidparam[0].kp, g_pidparam[0].ki, g_pidparam[0].kd, DIRECT);
 
 
 void setup()
-{
+{    
   SERIALPORT.begin(BAUDRATE);
 
   g_ms_select = INDEP; //Defaults to independent  
@@ -139,12 +169,9 @@ void setup()
   pinMode(ext_clock_led, OUTPUT); //on board clock ok led output
   digitalWrite(clock_led, LOW);
   digitalWrite(ext_clock_led, LOW);
-
-
   
   pinMode(ldac0,OUTPUT);
-  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
-  
+  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.  
 
   pinMode(ldac1,OUTPUT);
   digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
@@ -185,7 +212,7 @@ void setup()
   for(int i = 0; i < NUMDACCHANNELS; i++)
   {
     g_DACsetpoint[i] = 0;
-  }  
+  }
 }
 
 ////////////////
@@ -195,7 +222,7 @@ void setup()
 std::vector<String> query_serial()
 // read incomming serial commands
 {
-  char received;
+  char received = 0;
   String inByte = "";
   std::vector<String> comm;
   while (received != '\r')
@@ -305,7 +332,7 @@ void router(std::vector<String> DB)
     break;
 
     case 10: // READ_CONVERT_TIME
-    readADCConversionTime(DB);
+    read_convert_time(DB);
     break;
 
     case 11: // CAL_ADC_WITH_DAC
@@ -413,7 +440,45 @@ void router(std::vector<String> DB)
       awg_ramp(DB);
       SERIALPORT.println("RAMP_FINISHED");
     }
+    break;
+    
+    case 29: //START_PID
+    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0)
+    {
+      start_pid(DB);
+      //SERIALPORT.println("PID_FINISHED");
+    }
+    break;
+    
+    case 30: //STOP_PID
+    stop_pid(DB);
+    break;
 
+    case 31://SET_PID_TUNE
+    set_pid_tune(DB);
+    break;
+
+    case 32://SET_PID_SETP
+    set_pid_setp(DB);
+    break;
+
+    case 33://SET_PID_LIMS
+    set_pid_lims(DB);
+    break;
+
+    case 34://SET_PID_DIR
+    set_pid_dir(DB);
+    break;
+
+    case 35://SET_PID_SLEW
+    if(DB.size() != 2)
+    {
+      SERIALPORT.println("SYNTAX ERROR");
+      break;
+    }
+    set_pid_slew(DB[1].toFloat());
+    break;
+    
     default:
     break;
   }
@@ -445,7 +510,7 @@ float readADC(byte DB)
   return voltage; // return mV
 }
 
-void readADCConversionTime(std::vector<String> DB)
+void read_convert_time(std::vector<String> DB)
 {
   if(DB.size() != 2)
   {
@@ -454,17 +519,23 @@ void readADCConversionTime(std::vector<String> DB)
   }
   int adcChannel;
   adcChannel = DB[1].toInt();
-  if (adcChannel < 0 || adcChannel > 3)
+  
+  SERIALPORT.println(readADCConversionTime(adcChannel));
+}
+
+int readADCConversionTime(int ch)
+{
+  if (ch < 0 || ch > 3)
   {
     SERIALPORT.println("ADC channel must be between 0 - 3");
-    return;
+    return -1;
   }
   byte cr;
-  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | adcChannel); //Read conversion time register
+  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | ch); //Read conversion time register
   cr=SPI.transfer(adc,0); //Read back the CT register
   //SERIALPORT.println(fw);
-  int convtime = ((int)(((cr&127)*128+249)/6.144)+0.5);
-  SERIALPORT.println(convtime);
+  int contime = ((int)(((cr&127)*128+249)/6.144)+0.5);
+  return contime;
 }
 
 //// DAC ////
@@ -550,19 +621,16 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
 
 void intRamp(std::vector<String> DB)
 {
-  int i, j;
-  bool error = false;
+  int i;
   String channelsDAC = DB[1];
   g_numrampDACchannels = channelsDAC.length();
   String channelsADC = DB[2];
   g_numrampADCchannels = channelsADC.length();
-  float v_min = -1 * DAC_FULL_SCALE;
-  float v_max = DAC_FULL_SCALE;
 
   g_done = false;
   g_stepcount = 0;
   //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != g_numrampDACchannels * 2 + 4))
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 4))
   {
     SERIALPORT.println("SYNTAX ERROR");
     return;
@@ -652,8 +720,7 @@ void intRamp(std::vector<String> DB)
 
 void spec_ana(std::vector<String> DB)
 {
-  int i, j;
-  bool error = false;
+  int i;
   String channelsADC = DB[1];
   g_numrampADCchannels = channelsADC.length();
   g_numsteps=DB[2].toInt();
@@ -714,7 +781,7 @@ void spec_ana(std::vector<String> DB)
 
 void writetobuffer()
 {
-   int16_t i, temp;
+   int16_t i;
    if(!g_done)
    {
 #ifdef OPTICAL //no buffer required for regular UART (optical)
@@ -758,9 +825,190 @@ void writetobuffer()
    }
 }
 
+////////////////////////////
+//// PID Correction    ////
+///////////////////////////
+
+//Start PID, currently DAC0 and ADC0, no inputs params, just starts
+void start_pid(std::vector<String> DB)
+{
+  g_pidparam[0].dacout = getDAC(g_pidparam[0].DACchan);//Start from current dac setpoint
+  g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
+  
+  g_pidparam[0].sampletime = readADCConversionTime(g_pidparam[0].ADCchan);//Get PID sample time in microsec from adc channel conversion time
+  
+  pid0.SetSampleTime(g_pidparam[0].sampletime);
+
+  set_pid_slew(g_pidparam[0].slewlimit);//has to occur after setting sample time
+  
+  if(g_pidparam[0].forward_dir == false)
+  {
+    pid0.SetControllerDirection(REVERSE);
+  }
+  else
+  {
+    pid0.SetControllerDirection(DIRECT);
+  }
+  
+  pid0.SetMode(AUTOMATIC);
+  pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);
+  
+  SPI.transfer(adc, ADC_CHSETUP | g_pidparam[0].ADCchan);//Access channel setup register
+  SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
+  SPI.transfer(adc, ADC_CHMODE | g_pidparam[0].ADCchan);   //Access channel mode register
+  SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
+  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
+
+  attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
+  NVIC_SetPriority(PIOC_IRQn, 1);
+  
+}
+//PID Interrupts every ADC sample
+void pidint(void)
+{
+  uint8_t b1, b2;
+  int decimal;
+  int16_t i;
+
+  SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_pidparam[0].ADCchan, SPI_CONTINUE); //Read channel data register
+  b1 = (SPI.transfer(adc, 0, SPI_CONTINUE)); // Read first byte
+  b2 = SPI.transfer(adc, 0); // Read second byte
+  
+  decimal = twoByteToInt(b1, b2);
+  g_pidparam[0].adcin = map2(decimal, 0, 65536, -10000.0, 10000.0);
+    
+  if(pid0.Compute())
+  {    
+    if(g_pidparam[0].dacout > (g_pidparam[0].dacoutlim + g_pidparam[0].slewcycle))
+    {
+      g_pidparam[0].dacoutlim += g_pidparam[0].slewcycle;
+    }
+    else if(g_pidparam[0].dacout < (g_pidparam[0].dacoutlim - g_pidparam[0].slewcycle))
+    {
+      g_pidparam[0].dacoutlim -= g_pidparam[0].slewcycle;
+    }
+    else 
+    {
+      g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
+    }
+    writeDAC(g_pidparam[0].DACchan, g_pidparam[0].dacoutlim, true);
+    g_pidparam[0].loopcount++;
+    if(g_pidparam[0].loopcount >= 10)
+    {
+      g_pidparam[0].loopcount = 0;      
+      //SERIALPORT.print("IN: ");      
+      float seradc = g_pidparam[0].adcin;
+      float serdac = g_pidparam[0].dacoutlim;      
+      byte * out1 = (byte *) &seradc;
+      byte * out2 = (byte *) &serdac;
+      //byte * b1 = (byte *) g_pidparam[0].adcin;      
+      SERIALPORT.write(out1,4);   
+      SERIALPORT.write(out2,4);
+      SERIALPORT.write(0xA5);
+      SERIALPORT.write(0x5A);
+
+    }
+    
+  }
+  
+
+}
+
+//Stop PID, no inputs params, just stops 
+void stop_pid(std::vector<String> DB)
+{
+  uint8_t i = 0;
+  pid0.SetMode(MANUAL);
+  detachInterrupt(digitalPinToInterrupt(drdy));
+  
+  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
+  for(i = 0; i < NUMADCCHANNELS; i++)
+  {
+  SPI.transfer(adc, ADC_CHSETUP | i);//Access channel setup register
+  SPI.transfer(adc, ADC_CHSETUP_RNG10BI);//set +/-10V range and disable for continuous mode
+  SPI.transfer(adc, ADC_CHMODE | i);   //Access channel mode register
+  SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
+  }
+}
+//SET_PID_TUNE,<P-coeff>,<I-coeff>,<D-coeff>
+
+void set_pid_tune(std::vector<String> DB)
+{
+
+  if(DB.size() != 4)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
+  g_pidparam[0].kp = DB[1].toFloat();
+  g_pidparam[0].ki = DB[2].toFloat();
+  g_pidparam[0].kd = DB[3].toFloat();
+  pid0.SetTunings(g_pidparam[0].kp, g_pidparam[0].ki, g_pidparam[0].kd);    
+}
+
+//SET_PID_SETP,<Setpoint in mV>
+void set_pid_setp(std::vector<String> DB)
+{
+  if(DB.size() != 2)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
+  g_pidparam[0].setpoint = DB[1].toFloat();  
+}
+
+//SET_PID_LIMS,<Lower limit in mV>,<Upper limit in mV>
+void set_pid_lims(std::vector<String> DB)
+{
+  if(DB.size() != 3)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
+  g_pidparam[0].dacmin = DB[1].toFloat();
+  g_pidparam[0].dacmax = DB[2].toFloat();
+  
+  pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);    
+}
+
+//SET_PID_DIR,<1 for forward, 0 for reverse>
+void set_pid_dir(std::vector<String> DB)
+{
+  if(DB.size() != 2)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }
+  if(DB[1].toInt() == 0)
+  {
+    g_pidparam[0].forward_dir = false;
+    pid0.SetControllerDirection(REVERSE);
+  }
+  else
+  {
+    g_pidparam[0].forward_dir = true;
+    pid0.SetControllerDirection(DIRECT);
+  }
+}
+
+//SET_PID_SLEW,<maximum slewrete in mV per second>
+void set_pid_slew(float slewlimit)
+{
+  if(slewlimit < 0)
+  {
+    SERIALPORT.println("SYNTAX ERROR");
+    return;
+  }    
+  g_pidparam[0].slewlimit = slewlimit;
+  g_pidparam[0].slewcycle = (g_pidparam[0].slewlimit * g_pidparam[0].sampletime) / 1000000.0; //divide for microseconds
+}
+
 //////////////////////
 //// CALIBRATION ////
 /////////////////////
+
 
 void loaddefaultcals()
 {
@@ -843,7 +1091,7 @@ String readADCzerocal(byte ch)
   b2 = SPI.transfer(adc,0x00);   // read byte 2
   b3 = SPI.transfer(adc,0x00);   // read byte 3
 
-  calvalue += b1 << 16;
+  calvalue = b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
 
@@ -878,7 +1126,7 @@ String readADCfullcal(byte ch)
   b2 = SPI.transfer(adc,0x00);   // read byte 2
   b3 = SPI.transfer(adc,0x00);   // read byte 3
 
-  calvalue += b1 << 16;
+  calvalue = b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
 
@@ -1126,6 +1374,10 @@ float getSingleReading(int adcchan)
     voltage = map2(decimal, 0, 65536, -10000.0, 10000.0);
     return voltage;
   }
+  else
+  {
+    return -999999.9;
+  }
 }
 
 float map2(float x, long in_min, long in_max, float out_min, float out_max)
@@ -1156,7 +1408,7 @@ void resetADC()
 
 void updatead()
 {
-   int16_t i, temp;
+   int16_t i;
    if(!g_done)
    {
       ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
@@ -1333,7 +1585,6 @@ float int16ToVoltage(int16_t data)
 int16_t voltageToInt16(float voltage)
 // map float voltage to 16bit int
 {
-  int decimal;
   if (voltage > DAC_FULL_SCALE || voltage < -1*DAC_FULL_SCALE)
   {
     error();
@@ -1529,7 +1780,6 @@ void clr_wave(std::vector<String> DB)
 void awg_ramp(std::vector<String> DB)
 {
   int i, j;
-  bool error = false;
   g_numwaves = DB[1].toInt(); //First parameter
   if(g_numwaves > AWGMAXWAVES)
   {
@@ -1570,14 +1820,12 @@ void awg_ramp(std::vector<String> DB)
   g_numrampDACchannels = channelsDAC.length();
   String channelsADC = DB[g_numwaves + 3];
   g_numrampADCchannels = channelsADC.length();
-  float v_min = -1 * DAC_FULL_SCALE;
-  float v_max = DAC_FULL_SCALE;
 
   g_done = false;
   g_firstsamples = true;
   
   //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != g_numrampDACchannels * 2 + 6 + g_numwaves))
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 6 + g_numwaves))
   {
     SERIALPORT.println("SYNTAX ERROR");
     return;
