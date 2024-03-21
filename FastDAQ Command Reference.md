@@ -1,44 +1,59 @@
 # FASTDAQ REFERENCE MANUAL
 
-Every command sent to the FastDAQ should be a string (ASCII characters). Every string should start with the operation to execute and end with the character that determines the end of the string, in this case ?\r? (carriage return).
+Every command sent to the FastDAQ should be a string (ASCII characters). Every string should start with the operation to execute and end with the character that determines the end of the string, in this case '\r' (carriage return).
 
 General Syntax:
 OPERATION,<data (varies with the operation)>'\r'(carriage return)
+
 Where items enclosed in triangle brackets (<>) must be substituted for values
 
 Where a DAC or ADC channel is specified, they are zero-indexed; An 8-channel DAC is addressed as channels 0-7, and a 4-channel ADC is addressed as channels 0-3.
 
-The DAC-ADC AD5764-AD7734 (FastDAQ) can execute the following operations: (*IDN?, *RDY?, GET_ADC, RAMP_SMART, INT_RAMP, SPEC_ANA, CONVERT_TIME, READ_CONVERT_TIME, GET_DAC, ADC_CH_ZERO_SC_CAL, ADC_CH_FULL_SC_CAL, CAL_ADC_WITH_DAC, WRITE_ADC_CAL, READ_ADC_CAL, DAC_OFFSET_ADJ, DAC_GAIN_ADJ, DAC_RESET_CAL, FULL_SCALE, SET_MODE, ARM_SYNC, CHECK_SYNC, ADD_WAVE, CLR_WAVE, CHECK_WAVE, AWG_RAMP, START_PID, STOP_PID, SET_PID_TUNE, SET_PID_SETP, SET_PID_LIMS, SET_PID_DIR, SET_PID_SLEW.
+The DAC-ADC AD5764-AD7734 (FastDAQ) can execute the following operations: *IDN?, *RDY?, GET_ADC, RAMP_SMART, INT_RAMP, SPEC_ANA, CONVERT_TIME, READ_CONVERT_TIME, GET_DAC, ADC_CH_ZERO_SC_CAL, ADC_CH_FULL_SC_CAL, CAL_ADC_WITH_DAC, WRITE_ADC_CAL, READ_ADC_CAL, DAC_OFFSET_ADJ, DAC_GAIN_ADJ, DAC_RESET_CAL, FULL_SCALE, SET_MODE, ARM_SYNC, CHECK_SYNC, ADD_WAVE, CLR_WAVE, CHECK_WAVE, AWG_RAMP, START_PID, STOP_PID, SET_PID_TUNE, SET_PID_SETP, SET_PID_LIMS, SET_PID_DIR, SET_PID_SLEW.
 
 When the FastDAQ does not recognize the operation, it return the string "NOP", which stands for "No Operation"
 
 A note about calibrations; The FastDAQ is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, 'FastDAQcalconstants_unitx.h' from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
 
 The ADC channels are pre-calibrated for the default conversion time of 395us, and the calibration can change with different conversion times, especially for conversion times faster than ~300 us. It is recommended to run the calibration routines, and record the calibration values, for the various conversion times that are intended to be used.
-## *IDN? and *RDY?
+
+### *IDN? and *RDY?
+
 IDN? returns the string "DAC-ADC_AD5764-AD7734_serialnumber"
 
 Example:
+
 *IDN?
 
 Returns:
+
 DAC-ADC_AD5764-AD7734_UNIT2
 
-RDY? returns the string ?READY? when the DAC-ADC is ready for a new operation.
+RDY? returns the string "READY" when the DAC-ADC is ready for a new operation.
+
 Example:
+
 *RDY?
+
 Returns:
+
 READY
-GET_ADC
+
+### GET_ADC
+
 GET_ADC returns the voltage in mV read by an input ADC channel. 
+
 Syntax:
+
 GET_ADC,<adc channel>
 
 Example:
+
 GET_ADC,0
 
 Returns:
-3.9999�
+
+3.9999
 
 
 RAMP_SMART
