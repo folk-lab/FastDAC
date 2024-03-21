@@ -17,46 +17,39 @@ A note about calibrations; The FastDAQ is pre-calibrated using a HP34401A DMM. I
 
 The ADC channels are pre-calibrated for the default conversion time of 395us, and the calibration can change with different conversion times, especially for conversion times faster than ~300 us. It is recommended to run the calibration routines, and record the calibration values, for the various conversion times that are intended to be used.
 
-### *IDN? and *RDY?
+## *IDN? and *RDY?
 
 IDN? returns the string "DAC-ADC_AD5764-AD7734_serialnumber"
 
-Example:
-
+Example:  
 *IDN?
 
-Returns:
-
+Returns:  
 DAC-ADC_AD5764-AD7734_UNIT2
 
 RDY? returns the string "READY" when the DAC-ADC is ready for a new operation.
 
-Example:
-
+Example:  
 *RDY?
 
-Returns:
-
+Returns:  
 READY
 
-### GET_ADC
+## GET_ADC
 
 GET_ADC returns the voltage in mV read by an input ADC channel. 
 
-Syntax:
-
+Syntax:  
 GET_ADC,<adc channel>
 
-Example:
-
+Example:  
 GET_ADC,0
 
-Returns:
-
+Returns:  
 3.9999
 
+## RAMP_SMART
 
-RAMP_SMART
 Ramps one DAC channel **in mV** to a specified setpoint at a given ramprate in 1ms steps. It looks up the current DAC value internally to make sure there are no sudden jumps in voltage. Internally it calls RAMP1 to do the actual ramp. 
 
 Syntax:
