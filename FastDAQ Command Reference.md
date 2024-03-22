@@ -203,7 +203,7 @@ Example:
 `READ_ADC_CAL,1`
 
 Returns:  
-`ch{adc channel},{zeroscale}ch{adc channel},{fullscale}`  
+`ch{adc channel},{zeroscale},ch{adc channel},{fullscale}`  
 `READ_FINISHED`
 
 ## DAC_OFFSET_ADJ

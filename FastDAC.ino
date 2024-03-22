@@ -371,6 +371,7 @@ void router(std::vector<String> DB)
 
     case 15: // READ_ADC_CAL
     buffer = readADCzerocal(DB[1].toInt());
+    buffer += ',';
     buffer += readADCfullcal(DB[1].toInt());
     SERIALPORT.println(buffer);
     SERIALPORT.println("READ_FINISHED");
