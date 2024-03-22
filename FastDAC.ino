@@ -1208,7 +1208,7 @@ void calDACgain(byte ch, float offset)
     numsteps = (int8_t)((offset / stepsize) + 0.5);
   }
 
-  n = snprintf(buffertemp,100,"%f,%d",stepsize*1000000,numsteps);
+  n = snprintf(buffertemp,100,"ch%d,%f,%d",ch,stepsize*1000000,numsteps);
   buffer = buffertemp;
 
   SERIALPORT.println(buffer);

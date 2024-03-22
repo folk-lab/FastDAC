@@ -231,7 +231,7 @@ Example (with DMM reading of -9.9969V):
 `DAC_GAIN_ADJ,0,0.00310`
 
 Returns:  
-`{gain stepsize},{gain register}`  
+`ch{dac channel},{gain stepsize},{gain register}`  
 `CALIBRATION_FINISHED`
 
 ## DAC_RESET_CAL
