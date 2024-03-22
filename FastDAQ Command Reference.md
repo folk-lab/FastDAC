@@ -176,7 +176,7 @@ Example:
 `CAL_ADC_WITH_DAC`
 
 Returns:  
-`ch0,{zeroScale ch0},ch1,{zeroScale ch1},ch2,{zeroScale ch2},ch3,{zeroScale ch3},ch0,{fullScale ch0},ch1,{fullScale ch1},ch2,{fullScale ch2},ch3,{fullScale ch3},`  
+`ch0,{zeroScale ch0},ch1,{zeroScale ch1},ch2,{zeroScale ch2},ch3,{zeroScale ch3},ch0,{fullScale ch0},ch1,{fullScale ch1},ch2,{fullScale ch2},ch3,{fullScale ch3}`  
 `CALIBRATION_FINISHED`
 
 ## WRITE_ADC_CAL

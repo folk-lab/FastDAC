@@ -1052,7 +1052,11 @@ void calADCwithDAC()
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     buffer += adc_ch_full_scale_cal(ch);
-    buffer += ",";
+    if(ch < (NUMADCCHANNELS - 1))
+    {
+      buffer += ",";      
+    }
+    
   }
 
   SERIALPORT.println(buffer);
