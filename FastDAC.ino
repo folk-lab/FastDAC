@@ -1590,6 +1590,8 @@ int16_t voltageToInt16(float voltage)
     error();
     return 0;
   }
+  //return (voltage*32768)/DAC_FULL_SCALE;
+  
   else if (voltage >= 0)
   {
     return voltage*32767/DAC_FULL_SCALE;
@@ -1598,6 +1600,7 @@ int16_t voltageToInt16(float voltage)
   {
     return voltage*32768/DAC_FULL_SCALE;
   }
+  
 }
 
 int32_t voltageToInt32(float voltage)

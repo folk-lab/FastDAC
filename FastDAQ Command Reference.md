@@ -3,66 +3,68 @@
 Every command sent to the FastDAQ should be a string (ASCII characters). Every string should start with the operation to execute and end with the character that determines the end of the string, in this case '\r' (carriage return).
 
 General Syntax:
-OPERATION,<data (varies with the operation)>'\r'(carriage return)
+OPERATION,{data (varies with the operation)}'\r'(carriage return)
 
-Where items enclosed in triangle brackets (<>) must be substituted for values
+Where items enclosed in braces ({}) must be substituted for values
 
 Where a DAC or ADC channel is specified, they are zero-indexed; An 8-channel DAC is addressed as channels 0-7, and a 4-channel ADC is addressed as channels 0-3.
 
-The DAC-ADC AD5764-AD7734 (FastDAQ) can execute the following operations: *IDN?, *RDY?, GET_ADC, RAMP_SMART, INT_RAMP, SPEC_ANA, CONVERT_TIME, READ_CONVERT_TIME, GET_DAC, ADC_CH_ZERO_SC_CAL, ADC_CH_FULL_SC_CAL, CAL_ADC_WITH_DAC, WRITE_ADC_CAL, READ_ADC_CAL, DAC_OFFSET_ADJ, DAC_GAIN_ADJ, DAC_RESET_CAL, FULL_SCALE, SET_MODE, ARM_SYNC, CHECK_SYNC, ADD_WAVE, CLR_WAVE, CHECK_WAVE, AWG_RAMP, START_PID, STOP_PID, SET_PID_TUNE, SET_PID_SETP, SET_PID_LIMS, SET_PID_DIR, SET_PID_SLEW.
+The DAC-ADC AD5764-AD7734 (FastDAQ) can execute the following operations: `*IDN?, *RDY?, GET_ADC, RAMP_SMART, INT_RAMP, SPEC_ANA, CONVERT_TIME, READ_CONVERT_TIME, GET_DAC, ADC_CH_ZERO_SC_CAL, ADC_CH_FULL_SC_CAL, CAL_ADC_WITH_DAC, WRITE_ADC_CAL, READ_ADC_CAL, DAC_OFFSET_ADJ, DAC_GAIN_ADJ, DAC_RESET_CAL, FULL_SCALE, SET_MODE, ARM_SYNC, CHECK_SYNC, ADD_WAVE, CLR_WAVE, CHECK_WAVE, AWG_RAMP, START_PID, STOP_PID, SET_PID_TUNE, SET_PID_SETP, SET_PID_LIMS, SET_PID_DIR, SET_PID_SLEW`
 
-When the FastDAQ does not recognize the operation, it return the string "NOP", which stands for "No Operation"
+When the FastDAQ does not recognize the operation, it return the string `NOP`, which stands for "No Operation"
 
-A note about calibrations; The FastDAQ is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, 'FastDAQcalconstants_unitx.h' from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
+A note about calibrations; The FastDAQ is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, `FastDAQcalconstants_unitx.h` from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
 
 The ADC channels are pre-calibrated for the default conversion time of 395us, and the calibration can change with different conversion times, especially for conversion times faster than ~300 us. It is recommended to run the calibration routines, and record the calibration values, for the various conversion times that are intended to be used.
 
-## *IDN? and *RDY?
+## `*IDN?` and `*RDY?`
 
-IDN? returns the string "DAC-ADC_AD5764-AD7734_serialnumber"
-
-Example:  
-*IDN?
-
-Returns:  
-DAC-ADC_AD5764-AD7734_UNIT2
-
-RDY? returns the string "READY" when the DAC-ADC is ready for a new operation.
+`*IDN?` returns the string `DAC-ADC_AD5764-AD7734_UNIT{serialnumber}_{firmware branch}`
 
 Example:  
-*RDY?
+`*IDN?`
 
 Returns:  
-READY
+`DAC-ADC_AD5764-AD7734_UNIT2_SERVICE`
+
+`*RDY?` returns the string `READY` when the DAC-ADC is ready for a new operation.
+
+Example:  
+`*RDY?`
+
+Returns:  
+`READY`
 
 ## GET_ADC
 
-GET_ADC returns the voltage in mV read by an input ADC channel. 
+`GET_ADC` returns the voltage in mV read by an input ADC channel. 
 
 Syntax:  
-GET_ADC,<adc channel>
+`GET_ADC,{adc channel}`
 
 Example:  
-GET_ADC,0
+`GET_ADC,0`
 
 Returns:  
-3.9999
+`3.9668`
 
 ## RAMP_SMART
 
 Ramps one DAC channel **in mV** to a specified setpoint at a given ramprate in 1ms steps. It looks up the current DAC value internally to make sure there are no sudden jumps in voltage. Internally it calls RAMP1 to do the actual ramp. 
 
-Syntax:
-RAMP_SMART,<dac_channel>,<setpoint>,<ramprate>
+Syntax:  
+RAMP_SMART,{dac_channel},{setpoint},{ramprate in mV/s}
 
-Example:
-RAMP_SMART,3,4000,1000  (to ramp DAC3 to 4000mV at 1000mV/s)
+Example (to ramp DAC3 to 4000mV at 1000mV/s):  
+RAMP_SMART,3,4000,1000  
 
-Returns:
+Returns:  
 RAMP_FINISHED
-INT_RAMP
+
+## INT_RAMP
+
 INT_RAMP ramps the specified DAC channels from the initial voltages to the final voltages and reads the specified ADC channels in a synchronized manner in a specified number of steps. It uses the ADC in a continuous sampling mode, and therefore there is no delay between updating the DAC output and acquiring the next ADC samples. While the ADC is acquiring the current samples, the next DAC step output values are being preloaded into the DAC, to be output synchronously as soon as the ADC samples are ready. The sample rate of this function is consistent, and capable of the maximum throughput of the ADC even while updating up to 8 DAC channels.
-Oversampling, in order to do additional filtering by the control PC, is achieved by specifying a large number of steps (up to 232-1). Each DAC channel?s output value is treated as a 64-bit integer, and is scaled back to a 16-bit integer before being sent to the DAC. This allows a large number of samples to be taken without actually incrementing the 16-bit DAC output.
+Oversampling, in order to do additional filtering by the control PC, is achieved by specifying a large number of steps (max 2^32-1). Each DAC channel?s output value is treated as a 64-bit integer, and is scaled back to a 16-bit integer before being sent to the DAC. This allows a large number of samples to be taken without actually incrementing the 16-bit DAC output.
 A ramp can be stopped at any time by sending the command ?STOP? (without the quotes).
 Syntax: (ALL mV)
 INT_RAMP,<dac channels>,<adc channels>,<initial dac voltage 1>,<?>,<initial dac voltage n>,<final dac voltage 1>,<?>,<final dac voltage n>,<# of steps>
@@ -264,10 +266,14 @@ CHECK_SYNC
 Returns:
 CLOCK_NOT_READY
 SYNC_NOT_READY
-AWG FUNCTIONS
+
+# AWG FUNCTIONS
+
 The FastDAQ has an arbitrary waveform mode where a sequence of DAC setpoints can be assigned to 2 separate wave arrays. Up to 100 setpoints can be configured for each wave, and the number of ADC samples to take at each setpoint is specified. When an AWG_RAMP sequence is started, the AWG DAC channels assigned to each wave loop through the sequence a specified number of times, then the ramp DAC channels will take a step. The AWG waveforms will repeat until the ramp DAC channels finish their ramp.
-ADD_WAVE
-ADD_WAVE is used to configure the arbitrary DAC setpoints. For each setpoint the number of ADC samples to take is also specified (up to 232-1). The function can be called multiple times until up to 100 setpoints have been stored, and should be sent in groups of 20 setpoints or less to avoid a possible serial buffer overflow.
+
+## ADD_WAVE
+
+ADD_WAVE is used to configure the arbitrary DAC setpoints. For each setpoint the number of ADC samples to take is also specified (max 2^32-1). The function can be called multiple times until up to 100 setpoints have been stored, and should be sent in groups of 20 setpoints or less to avoid a possible serial buffer overflow.
 Syntax:
 ADD_WAVE,<wave number (0 or 1)>,<Setpoint 0 in mV>,<Number of ADC samples to take at setpoint 0>,?<Setpoint n in mV>,<Number of samples to take at Setpoint n>
 
@@ -275,7 +281,9 @@ Example (setting 4 setpoints with various sample lengths to wave 0):
 ADD_WAVE,0,100.0,50,500.0,25,200.0,100,-5000.0,25
 Returns:
 WAVE,0,4
-CHECK_WAVE
+
+## CHECK_WAVE
+
 CHECK_WAVE returns how many setpoints, and the total number of samples, have been configured for the specified wave number (0 or 1)
 Syntax:
 CHECK_WAVE,<wave number>
@@ -285,7 +293,9 @@ CHECK_WAVE,0
 
 Returns:
 WAVE,0,4,200
-CLR_WAVE
+
+## CLR_WAVE
+
 CLR_WAVE resets the number of configured setpoints for a specified waveform back to 0
 Syntax:
 CLR_WAVE,<wave number>
@@ -296,18 +306,23 @@ CLR_WAVE,1
 Returns:
 WAVE,1,0
 
-AWG_RAMP
+## AWG_RAMP
+
 Similar to INT_RAMP you specify which ADC channels to sample and DAC channels to ramp, as well as number of ramp steps. Additionally, you select the number of independent waveforms (currently max 2), The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. If the waveforms are different lengths, the repetition counter will increment when any waveform completes.
-A ramp can be stopped at any time by sending the command ?STOP? (without the quotes).
-Syntax:
-AWG_RAMP,<number of independent waveforms>,<DAC channels assigned to waveform 0>,<?>,<DAC channels assigned to waveform N>,<DACs to ramp>,<ADCs to sample>,<Initial DAC voltage 1>,<?>,<Initial DAC voltage N>,<Final DAC voltage 1>,<?>,<Final DAC voltage N>,<# of waveform repetitions at each ramp step>,<# of ramp steps>
 
-Example (Use 1 waveform, assign DAC 7 to waveform 0, Ramp DACs 1,3,5, Sample ADC 0, Ramp DAC 1 from -5V to +5V in 5000 steps, Repeat waveform 10 times at each ramp step, 1000 ramp steps)
-AWG_RAMP,1,7,135,0,-5000,5000,10,1000
+A ramp can be stopped at any time by sending the command `STOP`.
 
-Returns:
-<# of steps * number of samples in wave * number of repetitions * number of selected adc channels * 16-bit integer samples>RAMP_FINISHED
-PID FUNCTIONS
+Syntax:  
+`AWG_RAMP,{number of independent waveforms},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step},{# of ramp steps}`
+
+Example (Use 1 waveform, assign DAC 7 to waveform 0, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step, 100 ramp steps):  
+`AWG_RAMP,1,7,13,0,-5000,-2500,5000,2500,10,100`
+
+Returns:  
+`<# of steps * number of samples in wave * number of repetitions * number of selected adc channels * 16-bit integer samples>RAMP_FINISHED`
+
+# PID FUNCTIONS
+
 Somewhat experimental, the FastDAQ can act as a PID controller, currently only ADC 0 acts as the input, and DAC 0 acts as the output. While in PID mode, no other commands which use the ADC should be issued (INT_RAMP, SPEC_ANA, AWG_RAMP, GET_ADC?), but DAC ramping channels other than DAC 0 via RAMP_SMART should be OK. While in PID mode, the loops runs continuously at the selected ADC 0 conversion time, and every 10th sample from ADC 0 and the output setting of DAC 0 will be returned as little-endian 4-byte floats followed by framing sequence 0xA5 0x5A. This formatting and framing sequence was chosen for easy testing and live tuning with RealTerm 3.0.1.44 and could be changed. The PID routines are based on this library with some modifications: 
 https://github.com/br3ttb/Arduino-PID-Library
 All PID functions can be called live while the PID is running or before it is started.
