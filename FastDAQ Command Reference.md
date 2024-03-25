@@ -304,7 +304,7 @@ Returns:
 
 `SYNC_NOT_READY` - This message will only appear if in `MASTER` or `SLAVE` mode. For the MASTER this means `ARM_SYNC` still needs to be called, for a SLAVE it could potentially be a bad or incorrect optical SYNC signal, or `ARM_SYNC` still need to be called on the MASTER.
 
-`CLOCK_SYNC_OK` - Both signals are acceptable for the current mode.
+`CLOCK_SYNC_READY` - Both signals are acceptable for the current mode.
 
 Syntax:  
 `CHECK_SYNC`
