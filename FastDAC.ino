@@ -23,7 +23,7 @@
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 
 #define OPTICAL //Comment this if still using old USB version
-
+#define SENDACK //Comment this to stop sending ACKs for every command
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
 
@@ -276,18 +276,18 @@ void router(std::vector<String> DB)
   float v;
   String buffer;
   int operation = indexOfOperation(DB[0]);
-  switch ( operation )
+  switch(operation)
   {
     case 0: // NOP
     SERIALPORT.println("NOP");
     break;
 
-    case 1: // *IDN?
-    IDN();
+    case 1: // *IDN?    
+    idn();
     break;
 
     case 2: // *RDY?
-    RDY();
+    rdy();
     break;
 
     case 3: // RESET
@@ -295,20 +295,15 @@ void router(std::vector<String> DB)
     break;
 
     case 4: // GET_DAC
-    SERIALPORT.println(getDAC(DB[1].toInt()), 4);
+    get_dac(DB);
     break;
 
     case 5: // GET_ADC
-    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
-    {
-      v=readADC(DB[1].toInt());
-      SERIALPORT.println(v,4);
-    }
+    get_adc(DB);
     break;
 
     case 6: // RAMP_SMART
     ramp_smart(DB);
-    SERIALPORT.println("RAMP_FINISHED");
     break;
 
     case 7: // INT_RAMP
@@ -503,19 +498,36 @@ int indexOfOperation(String operation)
 
 //// ADC ////
 
-float readADC(byte DB)
+void get_adc(std::vector<String> DB)
 {
-  int adcChannel=DB;
-  float voltage;
-  voltage = getSingleReading(adcChannel); // return mV
-  return voltage; // return mV
+  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  {
+    return;
+  }  
+  if(DB.size() != 2)//Check correct number of parameters
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t adcChannel = DB[1].toInt();
+  if(adcChannel >= NUMADCCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  else
+  {
+    send_ack();
+    SERIALPORT.println(getSingleReading(adcChannel),4);
+  }  
+  return;
 }
 
 void read_convert_time(std::vector<String> DB)
 {
   if(DB.size() != 2)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }
   int adcChannel;
@@ -528,7 +540,7 @@ int readADCConversionTime(int ch)
 {
   if (ch < 0 || ch > 3)
   {
-    SERIALPORT.println("ADC channel must be between 0 - 3");
+    range_error();
     return -1;
   }
   byte cr;
@@ -540,8 +552,27 @@ int readADCConversionTime(int ch)
 }
 
 //// DAC ////
-
-float getDAC(int ch)
+void get_dac(std::vector<String> DB) //(DAC channel)
+{
+  if(DB.size() != 2)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t dacChannel = DB[1].toInt();
+  if(dacChannel >= NUMDACCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  else
+  {
+    send_ack();
+    SERIALPORT.println(readDAC(dacChannel), 4);
+  }
+  
+}
+float readDAC(int ch)
 {
   float voltage;
   voltage = int16ToVoltage(g_DACsetpoint[ch]);
@@ -592,16 +623,28 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
 {
   if(DB.size() != 4)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }
-  float channel = DB[1].toInt();
+  uint8_t dacChannel = DB[1].toInt();
+  if(dacChannel >= NUMDACCHANNELS)
+  {
+    range_error();
+    return;
+  }
   float setpoint = DB[2].toFloat();
+  if((abs(setpoint) / 1000.0) > DAC_FULL_SCALE)
+  {
+    range_error();
+    return;
+  }
   float ramprate = DB[3].toFloat();
-  float initial = getDAC(channel);  //mV
+  float initial = readDAC(dacChannel);  //mV
 
+  send_ack();
   if (abs(setpoint-initial) < 0.0001)  //If already at setpoint
   {
+    SERIALPORT.println("RAMP_FINISHED");
     return;
   }
   // Calc ramprate, make vector string, pass to autoRamp1
@@ -610,14 +653,9 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   {
     nSteps = 5;
   }
-  std::vector<String> autoRampInput;
-  autoRampInput.push_back("RAMP1");
-  autoRampInput.push_back(String(channel));
-  autoRampInput.push_back(String(initial));
-  autoRampInput.push_back(String(setpoint));
-  autoRampInput.push_back(String(nSteps));
-  autoRampInput.push_back("1000"); //1000us delay between steps
-  autoRamp1(autoRampInput);
+  autoRamp1(initial, setpoint, nSteps, dacChannel, 1000);
+  SERIALPORT.println("RAMP_FINISHED");
+  return;
 }
 
 void intRamp(std::vector<String> DB)
@@ -833,7 +871,7 @@ void writetobuffer()
 //Start PID, currently DAC0 and ADC0, no inputs params, just starts
 void start_pid(std::vector<String> DB)
 {
-  g_pidparam[0].dacout = getDAC(g_pidparam[0].DACchan);//Start from current dac setpoint
+  g_pidparam[0].dacout = readDAC(g_pidparam[0].DACchan);//Start from current dac setpoint
   g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
   
   g_pidparam[0].sampletime = readADCConversionTime(g_pidparam[0].ADCchan);//Get PID sample time in microsec from adc channel conversion time
@@ -1270,15 +1308,34 @@ void convertDACch(int *ch, int *spipin, int *ldacpin)
 
 //// GENERAL ////
 
-void IDN()
+void send_ack(void)
+{
+#ifdef SENDACK  
+  SERIALPORT.println("ACK");
+#endif
+}
+
+void syntax_error(void)
+{
+  SERIALPORT.println("SYNTAX_ERROR");
+}
+
+void range_error(void)
+{
+  SERIALPORT.println("RANGE_ERROR");
+}
+
+void idn()
 // return IDN string
 {
+  send_ack();
   SERIALPORT.println(IDSTRING);
 }
 
-void RDY()
+void rdy()
 // retrun "READY"
 {
+  send_ack();
   SERIALPORT.println("READY");
 }
 
@@ -1399,6 +1456,7 @@ int twoByteToInt(byte DB1,byte DB2)
 void resetADC()
 // resets the ADCs, and sets the range to default +-10 V
 {
+  send_ack();
   byte ch = 0;
 
   digitalWrite(data,HIGH);digitalWrite(reset,HIGH);digitalWrite(reset,LOW);digitalWrite(reset,HIGH);
@@ -1489,37 +1547,43 @@ void updatead()
    }
 }
 
-void autoRamp1(std::vector<String> DB)
+void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period)
 // voltage in mV
 {
-  if(DB.size() != 6)
+  digitalWrite(data,HIGH);
+  uint32_t timer = micros();
+  int j = 0;
+  while(j < nSteps)
   {
-    SERIALPORT.println("SYNTAX ERROR");
-    return;
+    uint32_t nowmicros = micros();
+    digitalWrite(data, HIGH);
+    if((nowmicros - timer) > period)//Time to take another step
+    {
+      timer = nowmicros;
+      writeDAC(dacChannel, v1+(v2-v1)*j/(nSteps-1), true); // takes mV
+      j++;
+    }
+    //Check for STOP command   
+    if(SERIALPORT.available())
+    {
+      std::vector<String> comm;
+      comm = query_serial();
+      if(comm[0] == "STOP")
+      {
+        break;
+      }
+    }
   }
-
-  float v1 = DB[2].toFloat(); // mV
-  float v2 = DB[3].toFloat(); // mV
-  int nSteps = DB[4].toInt();
-  int dacChannel=DB[1].toInt();
-
-  for (int j=0; j<nSteps;j++)
-  {
-    int timer = micros();
-    digitalWrite(data,HIGH);
-    writeDAC(dacChannel, v1+(v2-v1)*j/(nSteps-1), true); // takes mV
-    digitalWrite(data,LOW);
-    while(micros() <= timer + DB[5].toInt());
-  }
+  digitalWrite(data,LOW);
 }
 
-float writeDAC(int dacChannel, float voltage, bool load)
+float writeDAC(uint8_t dacChannel, float voltage, bool load)
 // voltage in mV
 {
   float actualvoltage;
   if(dacChannel >= NUMDACCHANNELS)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    range_error();
     return 0;
   }
   digitalWrite(data, HIGH);
@@ -1541,7 +1605,7 @@ float dacDataSend(int ch, float voltage)
   digitalWrite(data, HIGH);
   DACintegersend(ch, voltageToInt16(voltage/1000.0));
   float voltreturn;
-  voltreturn = getDAC(ch);
+  voltreturn = readDAC(ch);
   return voltreturn;
 }
 
