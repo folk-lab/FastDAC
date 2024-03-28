@@ -31,9 +31,12 @@
 
 #define USBBUFFSIZE 300// works up to 450, but at some value higher than that the behaviour is to wait and send >2000 byte packets. Don't know why. Not used with optical comms
 
+#define COMMANDBUFFERSIZE 1024 //Buffer for incoming command
+#define MAXPARAMS 50 //maximum number of parameters to be parsed in a single command
+
 #define DACSETTLETIME  1//milliseconds to wait before starting ramp
 
-//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
+#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
@@ -46,11 +49,14 @@
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
+#define COMMWAIT 2//Milliseconds to wait after receiving a command before purging port, should be at least 1 char length
+
 const int Noperations = 36;
-String operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
+char * operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
 "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
 "DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
 "START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR", "SET_PID_SLEW"};
+
 
 
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
@@ -102,6 +108,16 @@ volatile int64_t g_DACstep[NUMDACCHANNELS];
 volatile uint32_t g_numsteps;
 volatile uint32_t g_stepcount = 0;
 
+
+
+
+typedef struct InCommand
+{
+  char buffer[COMMANDBUFFERSIZE];
+  char *token[MAXPARAMS];
+  uint16_t paramcount;
+  uint16_t bufflength;
+}InCommand;
 
 //Arbitrary waveform specific
 
@@ -219,38 +235,61 @@ void setup()
 //// ROUTER ////
 ///////////////
 
-std::vector<String> query_serial()
-// read incomming serial commands
-{
-  char received = 0;
-  String inByte = "";
-  std::vector<String> comm;
-  while (received != '\r')
+//query_serial returns true if command detected
+bool query_serial(InCommand *incommand)
+{  
+  static uint16_t index = 0; 
+
+  bool commreceived = false;  
+  char received;  
+  if(SERIALPORT.available() > 0)
   {
-    if(SERIALPORT.available())
+    received = SERIALPORT.read();
+    if ((received == '\r') || (received == '\n'))//Check for end of message 
     {
-      received = SERIALPORT.read();
-      if (received == '\n' || received == ' ')
-      {}
-      else if (received == ',' || received == '\r')
+      if(index >= 1)//check if the termchars were extra from previous command and ignore EOM on its own
       {
-        comm.push_back(inByte);
-        inByte = "";
-      }
-      else
-      {
-        inByte += received;
-      }
+        incommand->buffer[index] = '\0';
+        commreceived = true;
+      }      
+    }
+    else if(index < COMMANDBUFFERSIZE - 2) //Add new character to string, but leave room for the null
+    {
+      incommand->buffer[index] = received;
+      index++;
+    }
+    else
+    {
+      SERIALPORT.println("ERROR_COMMAND_BUFFER_OVERFLOW");
+      index = 0;      
     }
   }
-  return comm;
+  if(commreceived)
+  {
+    uint16_t count = 0;
+    char * token = strtok(incommand->buffer, ",");
+    while (token != NULL)
+    {
+      //SERIALPORT.println(token);
+      incommand->token[count] = token;
+      count++;
+      token = strtok(NULL, ",");
+    }    
+    incommand->paramcount = count;
+    incommand->bufflength = index;
+    //SERIALPORT.println(incommand->paramcount);
+    //SERIALPORT.println(incommand->bufflength);
+    index = 0;
+  }
+  return commreceived;
+
 }
 
 void loop()
 // look for incoming commands, update status
 {
-  SERIALPORT.flush();
-  std::vector<String> comm;
+  //static bool cmd = false;
+  static InCommand incommand = {0};
   if(digitalRead(clock_lol) || digitalRead(clock_los))
   {
     g_clock_synced = false;
@@ -263,19 +302,18 @@ void loop()
     digitalWrite(clock_led, HIGH);
     digitalWrite(ext_clock_led, HIGH);
   }
-
-  if(SERIALPORT.available())
+  
+  if(query_serial(&incommand))
   {
-    comm = query_serial();
-    router(comm);
+    router(&incommand);    
   }
+     
 }
 
-void router(std::vector<String> DB)
+void router(InCommand *incommand)
 {
   float v;
-  String buffer;
-  int operation = indexOfOperation(DB[0]);
+  int operation = indexOfOperation(incommand);
   switch(operation)
   {
     case 0: // NOP
@@ -295,36 +333,29 @@ void router(std::vector<String> DB)
     break;
 
     case 4: // GET_DAC
-    get_dac(DB);
+    get_dac(incommand);
     break;
-
+  
     case 5: // GET_ADC
-    get_adc(DB);
+    get_adc(incommand);
     break;
-
+  
     case 6: // RAMP_SMART
-    ramp_smart(DB);
+    ramp_smart(incommand);
     break;
-
+    
     case 7: // INT_RAMP
-    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0) //make sure ADC has a clock and sync armed if not indep mode
-    {
-      intRamp(DB);
-      SERIALPORT.println("RAMP_FINISHED");
-    }   
+    intRamp(incommand);
     break;
-
+    
     case 8: // SPEC_ANA
-    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0) //make sure ADC has a clock and sync armed if not indep mode
-    {
-      spec_ana(DB);
-      SERIALPORT.println("READ_FINISHED");
-    }
+    spec_ana(incommand);
     break;
-
+    
     case 9: // CONVERT_TIME
-    writeADCConversionTime(DB);
+    //writeADCConversionTime(DB);
     break;
+    /*
 
     case 10: // READ_CONVERT_TIME
     read_convert_time(DB);
@@ -474,17 +505,17 @@ void router(std::vector<String> DB)
     }
     set_pid_slew(DB[1].toFloat());
     break;
-    
+    */
     default:
     break;
   }
 }
 
-int indexOfOperation(String operation)
+int indexOfOperation(InCommand *incommand)
 {
   for(int index = 0; index < Noperations; index++)
   {
-    if(operations[index] == operation)
+    if(strcmp(operations[index],incommand->token[0]) == 0)
     {
       return index;
     }
@@ -498,18 +529,18 @@ int indexOfOperation(String operation)
 
 //// ADC ////
 
-void get_adc(std::vector<String> DB)
+void get_adc(InCommand *incommand)
 {
   if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
   {
     return;
   }  
-  if(DB.size() != 2)//Check correct number of parameters
+  if(incommand->paramcount != 2)//Check correct number of parameters
   {
     syntax_error();
     return;
   }
-  uint8_t adcChannel = DB[1].toInt();
+  uint8_t adcChannel = atoi(incommand->token[1]);
   if(adcChannel >= NUMADCCHANNELS)
   {
     range_error();
@@ -552,14 +583,14 @@ int readADCConversionTime(int ch)
 }
 
 //// DAC ////
-void get_dac(std::vector<String> DB) //(DAC channel)
+void get_dac(InCommand * incommand) //(DAC channel)
 {
-  if(DB.size() != 2)
+  if(incommand->paramcount != 2)
   {
     syntax_error();
     return;
   }
-  uint8_t dacChannel = DB[1].toInt();
+  uint8_t dacChannel = atoi(incommand->token[1]);
   if(dacChannel >= NUMDACCHANNELS)
   {
     range_error();
@@ -619,26 +650,32 @@ void writeADCConversionTime(std::vector<String> DB)
 
 //// DAC ////
 
-void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
+void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
 {
-  if(DB.size() != 4)
+  if(incommand->paramcount != 4)
   {
     syntax_error();
     return;
   }
-  uint8_t dacChannel = DB[1].toInt();
+  uint8_t dacChannel = atoi(incommand->token[1]);
   if(dacChannel >= NUMDACCHANNELS)
   {
     range_error();
     return;
   }
-  float setpoint = DB[2].toFloat();
+  float setpoint = atof(incommand->token[2]);
   if((abs(setpoint) / 1000.0) > DAC_FULL_SCALE)
   {
     range_error();
     return;
   }
-  float ramprate = DB[3].toFloat();
+  //float ramprate = DB[3].toFloat();
+  float ramprate = atof(incommand->token[3]);
+  if(ramprate <= 0.0)
+  {
+    range_error();
+    return;
+  }
   float initial = readDAC(dacChannel);  //mV
 
   send_ack();
@@ -653,36 +690,76 @@ void ramp_smart(std::vector<String> DB)  //(channel,setpoint,ramprate)
   {
     nSteps = 5;
   }
-  autoRamp1(initial, setpoint, nSteps, dacChannel, 1000);
+  autoRamp1(initial, setpoint, nSteps, dacChannel, 1000, incommand);
   SERIALPORT.println("RAMP_FINISHED");
   return;
 }
 
-void intRamp(std::vector<String> DB)
+void intRamp(InCommand *incommand)
 {
   int i;
-  String channelsDAC = DB[1];
-  g_numrampDACchannels = channelsDAC.length();
-  String channelsADC = DB[2];
-  g_numrampADCchannels = channelsADC.length();
+    //check for minimum number of parameters
+  if(check_sync(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
+  
+  if(incommand->paramcount < 6)
+  {
+    syntax_error();
+    return;
+  }
+
+  //String channelsDAC = DB[1];
+  //g_numrampDACchannels = channelsDAC.length();
+  g_numrampDACchannels = strlen(incommand->token[1]);  
+  g_numrampADCchannels = strlen(incommand->token[2]);
 
   g_done = false;
   g_stepcount = 0;
   //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 4))
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (incommand->paramcount != g_numrampDACchannels * 2 + 4))
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }  
-
-  g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
+  //define DAC channels and check range
   for(i = 0; i < g_numrampDACchannels; i++)
   {
-    g_DACchanselect[i] = channelsDAC[i] - '0';
-    g_DACstartpoint[i] = voltageToInt32(DB[i+3].toFloat()/1000.0);
+    //g_DACchanselect[i] = channelsDAC[i] - '0';
+    g_DACchanselect[i] = incommand->token[1][i] - '0';
+    if(g_DACchanselect[i] >= NUMDACCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+  //define ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
+  {  
+    g_ADCchanselect[i] = incommand->token[2][i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+  //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
+  g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+3]);
+  //configure DAC channels
+  for(i = 0; i < g_numrampDACchannels; i++)
+  {
+    //g_DACchanselect[i] = channelsDAC[i] - '0';
+    //g_DACchanselect[i] = incommand->token[1][i] - '0';
+    //if(g_DACchanselect[i] >= NUMDACCHANNELS)
+    //{
+    //  range_error();
+    //  return;
+    //}
+    g_DACstartpoint[i] = voltageToInt32(atof(incommand->token[i+3])/1000.0);
     //g_DACramppoint[i] = g_DACstartpoint[i];
     g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
-    g_DACendpoint[i] = voltageToInt32(DB[i+3+g_numrampDACchannels].toFloat()/1000.0);
+    g_DACendpoint[i] = voltageToInt32(atof(incommand->token[i+3+g_numrampDACchannels])/1000.0);
     g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31)) / g_numsteps;
     DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set DACs to initial point
 
@@ -705,7 +782,14 @@ void intRamp(std::vector<String> DB)
 
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
   {
-    g_ADCchanselect[i] = channelsADC[i] - '0';
+    /*
+    g_ADCchanselect[i] = incommand->token[2][i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    } 
+    */   
     SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
     SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
     SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
@@ -727,19 +811,17 @@ void intRamp(std::vector<String> DB)
   attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
+  send_ack();  
   while(!g_done)
   {
-    if(SERIALPORT.available())
+    if(query_serial(incommand))
     {
-      std::vector<String> comm;
-      comm = query_serial();
-      if(comm[0] == "STOP")
+      if(strcmp("STOP", incommand->token[0]) == 0)
       {
         break;
-      }
+      }     
     }
-  }
+  }  
   detachInterrupt(digitalPinToInterrupt(drdy));
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
@@ -751,33 +833,62 @@ void intRamp(std::vector<String> DB)
   SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
   }
   digitalWrite(data,LOW);
+  SERIALPORT.println("RAMP_FINISHED");
 }
 
 ////////////////////////////
 //// SPECTRUM ANALYZER ////
 ///////////////////////////
 
-void spec_ana(std::vector<String> DB)
+void spec_ana(InCommand * incommand)
 {
   int i;
-  String channelsADC = DB[1];
-  g_numrampADCchannels = channelsADC.length();
-  g_numsteps=DB[2].toInt();
+
+  if(check_sync(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
+
+  if(incommand->paramcount != 3)
+  {
+    syntax_error();
+    return;
+  }
+  //String channelsADC = DB[1];
+  g_numrampADCchannels = strlen(incommand->token[1]);
+  g_numsteps=atoi(incommand->token[2]);
 
   g_done = false;
   g_stepcount = 0;
+
   // Do some bounds checking
-  if((g_numrampADCchannels > NUMADCCHANNELS) || (DB.size() != 3))
+  if(g_numrampADCchannels > NUMADCCHANNELS)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }
 
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
-
+  //select ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)
+  {
+    g_ADCchanselect[i] = incommand->token[1][i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
   for(i = 0; i < g_numrampADCchannels; i++) // Configure ADC channels
   {
-    g_ADCchanselect[i] = channelsADC[i] - '0';
+    /*
+    g_ADCchanselect[i] = incommand->token[1][i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+    */
     SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
     SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
     SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
@@ -791,20 +902,19 @@ void spec_ana(std::vector<String> DB)
 
   attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
+
+  send_ack();  
   while(!g_done)
   {
-    // Look for user interrupt ("STOP")
-    if(SERIALPORT.available())
+    if(query_serial(incommand))
     {
-      std::vector<String> comm;
-      comm = query_serial();
-      if(comm[0] == "STOP")
+      if(strcmp("STOP", incommand->token[0]) == 0)
       {
         break;
-      }
+      }     
     }
-  }
+  }  
+
   detachInterrupt(digitalPinToInterrupt(drdy));
   SPI.transfer(adc, ADC_IO); // Write to ADC IO register
   SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); // Change RDY to trigger when any channel complete
@@ -816,6 +926,7 @@ void spec_ana(std::vector<String> DB)
   SPI.transfer(adc, ADC_MODE_IDLE); // Set ADC to idle
   }
   digitalWrite(data,LOW);
+  SERIALPORT.println("READ_FINISHED");
 }
 
 void writetobuffer()
@@ -1329,7 +1440,11 @@ void idn()
 // return IDN string
 {
   send_ack();
-  SERIALPORT.println(IDSTRING);
+  SERIALPORT.print(IDSTRING);
+  SERIALPORT.print("_UNIT");
+  SERIALPORT.print(UNITNUM);
+  SERIALPORT.print("_");
+  SERIALPORT.println(FW_VER);  
 }
 
 void rdy()
@@ -1547,7 +1662,7 @@ void updatead()
    }
 }
 
-void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period)
+void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period, InCommand *incommand)
 // voltage in mV
 {
   digitalWrite(data,HIGH);
@@ -1564,11 +1679,9 @@ void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t
       j++;
     }
     //Check for STOP command   
-    if(SERIALPORT.available())
+    if(query_serial(incommand))
     {
-      std::vector<String> comm;
-      comm = query_serial();
-      if(comm[0] == "STOP")
+      if(strcmp("STOP", incommand->token[0]) == 0)
       {
         break;
       }
@@ -1989,12 +2102,14 @@ void awg_ramp(std::vector<String> DB)
   {
     if(SERIALPORT.available())
     {
+      /*
       std::vector<String> comm;
       comm = query_serial();
       if(comm[0] == "STOP")
       {
         break;
       }
+      */
     }
   }
   detachInterrupt(digitalPinToInterrupt(drdy));
