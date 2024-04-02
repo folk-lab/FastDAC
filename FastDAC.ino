@@ -353,13 +353,14 @@ void router(InCommand *incommand)
     break;
     
     case 9: // CONVERT_TIME
-    //writeADCConversionTime(DB);
+    writeADCConversionTime(incommand);
     break;
-    /*
-
+  
     case 10: // READ_CONVERT_TIME
-    read_convert_time(DB);
+    read_convert_time(incommand);
     break;
+
+/*
 
     case 11: // CAL_ADC_WITH_DAC
     if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
@@ -554,16 +555,21 @@ void get_adc(InCommand *incommand)
   return;
 }
 
-void read_convert_time(std::vector<String> DB)
+void read_convert_time(InCommand *incommand)
 {
-  if(DB.size() != 2)
+  if(incommand->paramcount != 2)
   {
     syntax_error();
     return;
   }
-  int adcChannel;
-  adcChannel = DB[1].toInt();
-  
+  uint8_t adcChannel;
+  adcChannel = atoi(incommand->token[1]);
+  if(adcChannel >= NUMADCCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  send_ack();  
   SERIALPORT.println(readADCConversionTime(adcChannel));
 }
 
@@ -616,17 +622,22 @@ float readDAC(int ch)
 
 //// ADC ////
 
-void writeADCConversionTime(std::vector<String> DB)
+void writeADCConversionTime(InCommand *incommand)
 {
-  int adcChannel = DB[1].toInt();
-  if(DB.size() != 3 || adcChannel > NUMADCCHANNELS-1)
+  if(incommand->paramcount != 3)//Check correct number of parameters
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
+    return;
+  }
+  uint8_t adcChannel = atoi(incommand->token[1]);
+  if(adcChannel >= NUMADCCHANNELS)
+  {
+    range_error();
     return;
   }
 
   byte cr;
-  float reqtime = DB[2].toFloat();
+  float reqtime = atof(incommand->token[2]);
   if(reqtime > 2686)
   {
     reqtime = 2686;
@@ -636,6 +647,9 @@ void writeADCConversionTime(std::vector<String> DB)
   {
     fw = 2;
   }
+
+  send_ack();
+
   fw |= 0x80; //enable chopping
 
   SPI.transfer(adc, ADC_CHCONVTIME | adcChannel); //Write conversion time register
