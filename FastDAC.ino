@@ -51,10 +51,10 @@
 
 #define COMMWAIT 2//Milliseconds to wait after receiving a command before purging port, should be at least 1 char length
 
-const int Noperations = 36;
+const int Noperations = 37;
 char * operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
 "READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
-"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
+"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "DISARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
 "START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR", "SET_PID_SLEW"};
 
 
@@ -392,87 +392,83 @@ void router(InCommand *incommand)
     dac_gain_adj(incommand);
     break;
     
-    /*
     case 19: // DAC_RESET_CAL
-    dac_ch_reset_cal(DB[1].toInt());
-    SERIALPORT.println("CALIBRATION_RESET");
+    dac_reset_cal(incommand);
     break;
-
+    
     case 20: // DEFAULT_CAL
-    loaddefaultcals(); // set default calibration
-    SERIALPORT.println("CALIBRATION_CHANGED");
+    default_cal(incommand);
     break;
-
+    
     case 21: // FULL_SCALE
-    DAC_FULL_SCALE = DB[1].toFloat();
-    SERIALPORT.println("FULL_SCALE_UPDATED");
+    full_scale(incommand);
     break;
-
+    
     case 22: //SET_MODE
-    set_mode(DB[1]);    
+    set_mode(incommand);
     break;
-
+    
     case 23: //ARM_SYNC
-    digitalWrite(adc_trig_out, LOW);
-    SERIALPORT.println("SYNC_ARMED");
+    arm_sync(incommand);
     break;
 
-    case 24: //CHECK_SYNC
-    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0)
-    {
-      SERIALPORT.println("CLOCK_SYNC_READY");    
-    }
+    case 24: //DISARM_SYNC
+    disarm_sync(incommand);
     break;
-
-    case 25: //ADD_WAVE
-    add_wave(DB);
+    
+    case 25: //CHECK_SYNC
+    check_sync(incommand);
     break;
-
-    case 26: //CLR_WAVE
+    
+    case 26: //ADD_WAVE
+    add_wave(incommand);
+    break;
+    /*
+    case 27: //CLR_WAVE
     clr_wave(DB);
     break;
 
-    case 27: //CHECK_WAVE
+    case 28: //CHECK_WAVE
     check_wave(DB);
     break;
 
-    case 28: //AWG_RAMP
-    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0)
+    case 29: //AWG_RAMP
+    if(sync_check(CHECK_CLOCK | CHECK_SYNC) == 0)
     {
       awg_ramp(DB);
       SERIALPORT.println("RAMP_FINISHED");
     }
     break;
     
-    case 29: //START_PID
-    if(check_sync(CHECK_CLOCK | CHECK_SYNC) == 0)
+    case 30: //START_PID
+    if(sync_check(CHECK_CLOCK | CHECK_SYNC) == 0)
     {
       start_pid(DB);
       //SERIALPORT.println("PID_FINISHED");
     }
     break;
     
-    case 30: //STOP_PID
+    case 31: //STOP_PID
     stop_pid(DB);
     break;
 
-    case 31://SET_PID_TUNE
+    case 32://SET_PID_TUNE
     set_pid_tune(DB);
     break;
 
-    case 32://SET_PID_SETP
+    case 33://SET_PID_SETP
     set_pid_setp(DB);
     break;
 
-    case 33://SET_PID_LIMS
+    case 34://SET_PID_LIMS
     set_pid_lims(DB);
     break;
 
-    case 34://SET_PID_DIR
+    case 35://SET_PID_DIR
     set_pid_dir(DB);
     break;
 
-    case 35://SET_PID_SLEW
+    case 36://SET_PID_SLEW
     if(DB.size() != 2)
     {
       SERIALPORT.println("SYNTAX ERROR");
@@ -506,7 +502,7 @@ int indexOfOperation(InCommand *incommand)
 
 void get_adc(InCommand *incommand)
 {
-  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  if(sync_check(CHECK_CLOCK) != 0)//make sure ADC has a clock
   {
     return;
   }  
@@ -687,7 +683,7 @@ void intRamp(InCommand *incommand)
 {
   int i;
     //check for minimum number of parameters
-  if(check_sync(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
   {
     return;
   }
@@ -721,6 +717,15 @@ void intRamp(InCommand *incommand)
       range_error();
       return;
     }
+    float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
+    float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
+    if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
+    {
+      range_error();
+      return;
+    }
+    g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+    g_DACendpoint[i] = voltageToInt32(dacendvoltage);
   }
   //define ADC channels and check range
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
@@ -733,21 +738,19 @@ void intRamp(InCommand *incommand)
     }
   }
   //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
+
   g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+3]);
+  #ifdef DEBUGRAMP
+  SERIALPORT.print("numsteps: ");
+  SERIALPORT.println(g_numsteps);
+  #endif  
   //configure DAC channels
   for(i = 0; i < g_numrampDACchannels; i++)
   {
-    //g_DACchanselect[i] = channelsDAC[i] - '0';
-    //g_DACchanselect[i] = incommand->token[1][i] - '0';
-    //if(g_DACchanselect[i] >= NUMDACCHANNELS)
-    //{
-    //  range_error();
-    //  return;
-    //}
-    g_DACstartpoint[i] = voltageToInt32(atof(incommand->token[i+3])/1000.0);
+
     //g_DACramppoint[i] = g_DACstartpoint[i];
     g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
-    g_DACendpoint[i] = voltageToInt32(atof(incommand->token[i+3+g_numrampDACchannels])/1000.0);
+
     g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31)) / g_numsteps;
     DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set DACs to initial point
 
@@ -832,7 +835,7 @@ void spec_ana(InCommand * incommand)
 {
   int i;
 
-  if(check_sync(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
   {
     return;
   }
@@ -1148,6 +1151,18 @@ void set_pid_slew(float slewlimit)
 /////////////////////
 
 
+void default_cal(InCommand *incommand)
+{
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
+  loaddefaultcals(); // set default calibration
+  SERIALPORT.println("CALIBRATION_CHANGED");
+}
+
 void loaddefaultcals()
 {
   byte ch = 0;
@@ -1168,7 +1183,7 @@ void loaddefaultcals()
 void cal_adc_with_dac(InCommand *incommand)
 {
   uint8_t ch = 0;
-  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  if(sync_check(CHECK_CLOCK) != 0)//make sure ADC has a clock
   {
     return;
   }
@@ -1215,7 +1230,7 @@ void cal_adc_with_dac(InCommand *incommand)
 
 void adc_zero_sc_cal(InCommand *incommand)
 {
-  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  if(sync_check(CHECK_CLOCK) != 0)//make sure ADC has a clock
   {
     return;
   }
@@ -1241,7 +1256,7 @@ void cal_adc_zero_scale(void)
 
 void adc_ch_zero_sc_cal(InCommand *incommand)
 {
-  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  if(sync_check(CHECK_CLOCK) != 0)//make sure ADC has a clock
   {
     return;
   }
@@ -1301,7 +1316,7 @@ uint32_t readADCzerocal(byte ch)
 
 void adc_ch_full_sc_cal(InCommand *incommand)
 {
-  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  if(sync_check(CHECK_CLOCK) != 0)//make sure ADC has a clock
   {
     return;
   }
@@ -1435,6 +1450,25 @@ void writeADCchfullscale(byte ch, int32_t fullscale)
 }
 
 //// DAC ////
+
+void full_scale(InCommand *incommand)
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  float dacscale = atof(incommand->token[1]);
+  if(dacscale < 0.0)
+  {
+    range_error();
+    return;
+  }
+  send_ack();
+  DAC_FULL_SCALE = dacscale;
+  SERIALPORT.println("FULL_SCALE_UPDATED");
+}
+
 void dac_offset_adj(InCommand *incommand)
 {
   if(incommand->paramcount != 3)
@@ -1537,7 +1571,26 @@ void calDACgain(byte ch, float offset)
   writeDACgain(ch, numsteps);
 }
 
-void dac_ch_reset_cal(byte ch)
+
+void dac_reset_cal(InCommand *incommand)
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t ch = atoi(incommand->token[1]);
+  if(ch >= NUMDACCHANNELS)
+  {
+    range_error();
+    return;
+  } 
+  send_ack();
+  dac_ch_reset_cal(ch);
+  SERIALPORT.println("CALIBRATION_RESET");
+}
+
+void dac_ch_reset_cal(uint8_t ch)
 {
   writeDACoffset(ch, 0);
   writeDACgain(ch, 0);
@@ -1772,7 +1825,7 @@ void updatead()
         {
            SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
            SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
-           SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte
+           SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte           
         }
       }
       else
@@ -1980,34 +2033,80 @@ int32_t voltageToInt32(float voltage)
 
 //// SYNC UTIL ////
 
-void set_mode(String mode)
+void set_mode(InCommand *incommand)
 {
-    if(mode == "MASTER")
-    {
-      digitalWrite(slave_master, LOW);
-      g_ms_select = MASTER;
-      SERIALPORT.println("MASTER_SET");  
-    }
-    else if(mode == "SLAVE")
-    {
-      digitalWrite(slave_master, HIGH);
-      g_ms_select = SLAVE;
-      SERIALPORT.println("SLAVE_SET");  
-    }
-    else if(mode == "INDEP")
-    {
-      digitalWrite(slave_master , LOW);
-      g_ms_select = INDEP;
-      SERIALPORT.println("INDEP_SET");
-    }
-    else
-    {
-      SERIALPORT.println("SYNTAX_ERROR");
-    }
-    
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  if(strcmp("MASTER",incommand->token[1]) == 0)
+  {
+    send_ack();
+    digitalWrite(slave_master, LOW);
+    g_ms_select = MASTER;
+    SERIALPORT.println("MASTER_SET");  
+  }
+  else if(strcmp("SLAVE",incommand->token[1]) == 0)
+  {
+    send_ack();
+    digitalWrite(slave_master, HIGH);
+    g_ms_select = SLAVE;
+    SERIALPORT.println("SLAVE_SET");  
+  }
+  else if((strcmp("INDEP",incommand->token[1]) == 0))
+  {
+    send_ack();
+    digitalWrite(slave_master , LOW);
+    g_ms_select = INDEP;
+    SERIALPORT.println("INDEP_SET");
+  }
+  else
+  {
+    syntax_error();
+    return;
+  }    
 }
 
-uint8_t check_sync(uint8_t mask) //Checks for valid clock and sync signal, returns 0 if ok, 1-3 if not: 1 (clock not ok) or'ed with 2 (sync_ok)
+void arm_sync(InCommand *incommand)
+{
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
+  digitalWrite(adc_trig_out, LOW);
+  SERIALPORT.println("SYNC_ARMED");
+}
+
+void disarm_sync(InCommand *incommand)
+{
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
+  digitalWrite(adc_trig_out, HIGH);
+  SERIALPORT.println("SYNC_DISARMED");
+}
+
+void check_sync(InCommand *incommand)
+{
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) == 0)
+  {
+    SERIALPORT.println("CLOCK_SYNC_READY");    
+  }
+}
+
+uint8_t sync_check(uint8_t mask) //Checks for valid clock and sync signal, returns 0 if ok, 1-3 if not: 1 (clock not ok) or'ed with 2 (sync_ok)
 {
   uint8_t syncstatus = 0;
 #ifdef OPTICAL //only check clock and sync with optical version
@@ -2032,9 +2131,15 @@ uint8_t check_sync(uint8_t mask) //Checks for valid clock and sync signal, retur
 
 //ADD_WAVE,<wave number, 0 indexed)>,<Setpoint 0 in mV>,<Number of samples at setpoint 0>,….<Setpoint n in mV>,<Number of samples at Setpoint n>
 //Maximum ~20 Setpoints per call, due to possible serial buffer overrun
-void add_wave(std::vector<String> DB) 
+void add_wave(InCommand *incommand)
 {
-  uint8_t wavenumber = DB[1].toInt();
+  if(incommand->paramcount < 4)
+  {
+    syntax_error();
+    return;
+  }
+  //uint8_t wavenumber = DB[1].toInt();
+  uint8_t wavenumber = atoi(incommand->token[1]);
   int32_t numsamples;
   if(wavenumber >= AWGMAXWAVES)
   {
@@ -2042,7 +2147,8 @@ void add_wave(std::vector<String> DB)
     SERIALPORT.println(AWGMAXWAVES);
     return;
   }
-  uint32_t numsetpoints = (DB.size() - 2) / 2;
+  //uint32_t numsetpoints = (DB.size() - 2) / 2;
+  uint32_t numsetpoints = (incommand->paramcount - 2) / 2;
   
   if((numsetpoints + g_awgwave[wavenumber].numsetpoints) > AWGMAXSETPOINTS)
   {
@@ -2050,23 +2156,31 @@ void add_wave(std::vector<String> DB)
     SERIALPORT.println(AWGMAXSETPOINTS);
     return;
   }
-  
+  //check for voltage and setpoint range errors before adding the wave
   for(uint32_t i = 0; i < numsetpoints; i++)
   {
-    g_awgwave[wavenumber].setpoint[i + g_awgwave[wavenumber].numsetpoints] = voltageToInt16(DB[(i * 2) + 2].toFloat() / 1000.0);
-    numsamples = DB[(i * 2) + 3].toInt();
-    if(numsamples > 0)
+    float setvolt = atof(incommand->token[(i * 2) + 2]) / 1000.0;
+    if(abs(setvolt) > DAC_FULL_SCALE)
     {
-      g_awgwave[wavenumber].numsamples[i + g_awgwave[wavenumber].numsetpoints] = numsamples;
-    }
-    else
-    {
-      SERIALPORT.println("ERROR, samplecount must be > 0");
+      range_error();
       return;
     }
-    
+    numsamples = atoi(incommand->token[(i * 2) + 3]);
+    if(numsamples < 1)
+    {
+      range_error();
+      return;
+    }
   }
-  
+  //all good, add the wave
+  for(uint32_t i = 0; i < numsetpoints; i++)
+  {
+    //g_awgwave[wavenumber].setpoint[i + g_awgwave[wavenumber].numsetpoints] = voltageToInt16(DB[(i * 2) + 2].toFloat() / 1000.0);
+    g_awgwave[wavenumber].setpoint[i + g_awgwave[wavenumber].numsetpoints] = voltageToInt16(atof(incommand->token[(i * 2) + 2]) / 1000.0);
+    //numsamples = DB[(i * 2) + 3].toInt();
+    g_awgwave[wavenumber].numsamples[i + g_awgwave[wavenumber].numsetpoints] = atoi(incommand->token[(i * 2) + 3]);
+  }
+  send_ack();
   g_awgwave[wavenumber].numsetpoints += numsetpoints;
   SERIALPORT.print("WAVE,");
   SERIALPORT.print(wavenumber);
@@ -2086,8 +2200,6 @@ void add_wave(std::vector<String> DB)
   SERIALPORT.print(F("Free RAM = ")); //F function does the same and is now a built in library, in IDE > 1.0.0
   SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
 #endif
-    
-  
 }
 
 //CHECK_WAVE,<wave number>

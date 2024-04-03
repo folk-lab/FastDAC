@@ -1,6 +1,6 @@
 # FASTDAQ REFERENCE MANUAL
 
-Every command sent to the FastDAQ should be a string (ASCII characters). Every string should start with the operation to execute and end with the character that determines the end of the string, in this case `\r` (carriage return).
+Every command sent to the FastDAQ should be a string (ASCII characters). Every string should start with the operation to execute and end with the character that determines the end of the string, in this case `\r` (carriage return), `\n` (newline), or a combination of both.
 
 General Syntax:
 `{operation},{data (varies with the operation)}\r(carriage return)`
@@ -12,6 +12,10 @@ Where a DAC or ADC channel is specified, they are zero-indexed; An 8-channel DAC
 The DAC-ADC AD5764-AD7734 (FastDAQ) can execute the following operations: `*IDN?`, `*RDY?`, `GET_ADC`, `RAMP_SMART`, `INT_RAMP`, `SPEC_ANA`, `CONVERT_TIME`, `READ_CONVERT_TIME`, `GET_DAC`, `ADC_CH_ZERO_SC_CAL`, `ADC_CH_FULL_SC_CAL`, `CAL_ADC_WITH_DAC`, `WRITE_ADC_CAL`, `READ_ADC_CAL`, `DAC_OFFSET_ADJ`, `DAC_GAIN_ADJ`, `DAC_RESET_CAL`, `FULL_SCALE`, `SET_MODE`, `ARM_SYNC`, `CHECK_SYNC`, `ADD_WAVE`, `CLR_WAVE`, `CHECK_WAVE`, `AWG_RAMP`, `START_PID`, `STOP_PID`, `SET_PID_TUNE`, `SET_PID_SETP`, `SET_PID_LIMS`, `SET_PID_DIR`, `SET_PID_SLEW`
 
 When the FastDAQ does not recognize the operation, it return the string `NOP`, which stands for "No Operation"
+
+If the operation is recognized but some parameters are incorrect, it will return `SYNTAX_ERROR` or `RANGE_ERROR`
+
+If the operation is recognized and all parameters are correct, it will return `ACK` followed by the expected response.
 
 A note about calibrations; The FastDAQ is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, `FastDAQcalconstants_unitx.h` from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
 
@@ -65,7 +69,7 @@ Returns:
 
 `INT_RAMP` ramps the specified DAC channels from the initial voltages to the final voltages and reads the specified ADC channels in a synchronized manner in a specified number of steps. It uses the ADC in a continuous sampling mode, and therefore there is no delay between updating the DAC output and acquiring the next ADC samples. While the ADC is acquiring the current samples, the next DAC step output values are being preloaded into the DAC, to be output synchronously as soon as the ADC samples are ready. The sample rate of this function is consistent, and capable of the maximum throughput of the ADC even while updating up to 8 DAC channels.
 
-Oversampling, in order to do additional filtering by the control PC, is achieved by specifying a large number of steps (max 2^32-1). Each DAC channel?s output value is treated as a 64-bit integer, and is scaled back to a 16-bit integer before being sent to the DAC. This allows a large number of samples to be taken without actually incrementing the 16-bit DAC output.
+Oversampling, in order to do additional filtering by the control PC, is achieved by specifying a large number of steps (max 2^31-1). Each DAC channel's output value is treated as a 64-bit integer, and is scaled back to a 16-bit integer before being sent to the DAC. This allows a large number of samples to be taken without actually incrementing the 16-bit DAC output.
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
@@ -295,6 +299,19 @@ Example:
 
 Returns:  
 `SYNC_ARMED`
+
+## DISARM_SYNC
+
+`DISARM_SYNC` is sent from the PC to the MASTER, it should rarely have to be used. One possible use is if the PC used `ARM_SYNC` on the MASTER before all SLAVE units had finished their previous sequence, which would cause the ADC to pause sampling. This would allow the SLAVE units to finish their sequence.
+
+Syntax:  
+`DISARM_SYNC`
+
+Example:  
+`DISARM_SYNC`
+
+Returns:  
+`SYNC_DISARMED`
 
 ## CHECK_SYNC
 
