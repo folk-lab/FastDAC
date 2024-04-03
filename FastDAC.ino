@@ -353,72 +353,46 @@ void router(InCommand *incommand)
     break;
     
     case 9: // CONVERT_TIME
-    writeADCConversionTime(incommand);
+    convert_time(incommand);
     break;
   
     case 10: // READ_CONVERT_TIME
     read_convert_time(incommand);
     break;
-
-/*
-
+    
     case 11: // CAL_ADC_WITH_DAC
-    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
-    {
-      calADCwithDAC();
-      SERIALPORT.println("CALIBRATION_FINISHED");
-    }
+    cal_adc_with_dac(incommand);
     break;
 
     case 12: // ADC_ZERO_SC_CAL
-    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
-    {
-      adc_zero_scale_cal(DB[1].toInt());
-      SERIALPORT.println("CALIBRATION_FINISHED");
-    }    
+    adc_zero_sc_cal(incommand);
     break;
 
     case 13: // ADC_CH_ZERO_SC_CAL
-    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
-    {
-      buffer = adc_ch_zero_scale_cal(DB[1].toInt());
-      SERIALPORT.println(buffer);
-      SERIALPORT.println("CALIBRATION_FINISHED");  
-    }    
+    adc_ch_zero_sc_cal(incommand);        
     break;
 
     case 14: // ADC_CH_FULL_SC_CAL
-    if(check_sync(CHECK_CLOCK) == 0)//make sure ADC has a clock
-    {
-      buffer = adc_ch_full_scale_cal(DB[1].toInt());
-      SERIALPORT.println(buffer);
-      SERIALPORT.println("CALIBRATION_FINISHED");
-    }
+    adc_ch_full_sc_cal(incommand);
     break;
-
+    
     case 15: // READ_ADC_CAL
-    buffer = readADCzerocal(DB[1].toInt());
-    buffer += ',';
-    buffer += readADCfullcal(DB[1].toInt());
-    SERIALPORT.println(buffer);
-    SERIALPORT.println("READ_FINISHED");
+    read_adc_cal(incommand);
     break;
-
+    
     case 16: // WRITE_ADC_CAL
-    writeADCcal(DB[1].toInt(), DB[2].toInt(), DB[3].toInt());
-    SERIALPORT.println("CALIBRATION_CHANGED");
+    write_adc_cal(incommand);
     break;
-
+    
     case 17: // DAC_OFFSET_ADJ
-    calDACoffset(DB[1].toInt(), DB[2].toFloat());
-    SERIALPORT.println("CALIBRATION_FINISHED");
+    dac_offset_adj(incommand);
     break;
-
+    
     case 18: // DAC_GAIN_ADJ
-    calDACgain(DB[1].toInt(), DB[2].toFloat());
-    SERIALPORT.println("CALIBRATION_FINISHED");
+    dac_gain_adj(incommand);
     break;
-
+    
+    /*
     case 19: // DAC_RESET_CAL
     dac_ch_reset_cal(DB[1].toInt());
     SERIALPORT.println("CALIBRATION_RESET");
@@ -622,7 +596,7 @@ float readDAC(int ch)
 
 //// ADC ////
 
-void writeADCConversionTime(InCommand *incommand)
+void convert_time(InCommand *incommand)
 {
   if(incommand->paramcount != 3)//Check correct number of parameters
   {
@@ -1191,11 +1165,19 @@ void loaddefaultcals()
 
 //// ADC ////
 
-void calADCwithDAC()
+void cal_adc_with_dac(InCommand *incommand)
 {
-  byte ch = 0;
-  String buffer;
-
+  uint8_t ch = 0;
+  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  {
+    return;
+  }
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     writeDAC(ch, 0.0, true); // mV
@@ -1203,8 +1185,11 @@ void calADCwithDAC()
   delayMicroseconds(2000); // wait 2 ms
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    buffer += adc_ch_zero_scale_cal(ch);
-    buffer += ",";
+    SERIALPORT.print("ch");
+    SERIALPORT.print(ch);
+    SERIALPORT.print(",");
+    SERIALPORT.print(cal_adc_ch_zero_scale(ch));
+    SERIALPORT.print(",");
   }
 
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
@@ -1214,28 +1199,74 @@ void calADCwithDAC()
   delayMicroseconds(2000); // wait 2ms
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    buffer += adc_ch_full_scale_cal(ch);
+    SERIALPORT.print("ch");
+    SERIALPORT.print(ch);
+    SERIALPORT.print(",");
+    SERIALPORT.print(cal_adc_ch_full_scale(ch));
     if(ch < (NUMADCCHANNELS - 1))
     {
-      buffer += ",";      
+      SERIALPORT.print(",");      
     }
     
   }
-
-  SERIALPORT.println(buffer);
+  SERIALPORT.println();
+  SERIALPORT.println("CALIBRATION_FINISHED");
 }
 
-void adc_zero_scale_cal(int ch)
+void adc_zero_sc_cal(InCommand *incommand)
 {
-  SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
+  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  {
+    return;
+  }
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
+  cal_adc_zero_scale();
+  SERIALPORT.println("CALIBRATION_FINISHED");
+}
+
+void cal_adc_zero_scale(void)
+{
+  SPI.transfer(adc, ADC_CHMODE);   // Access ch mode register in write mode
   SPI.transfer(adc, ADC_MODE_IDLE);       // Enter idle mode
 
-  SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
+  SPI.transfer(adc, ADC_CHMODE);   // Access ch mode register in write mode
   SPI.transfer(adc, ADC_MODE_SELFZEROCAL);       // Enter system zero-scale cal mode
   waitDRDY();
 }
 
-String adc_ch_zero_scale_cal(int ch)
+void adc_ch_zero_sc_cal(InCommand *incommand)
+{
+  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  {
+    return;
+  }
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t ch = atoi(incommand->token[1]);
+  if(ch >= NUMADCCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  
+  send_ack();
+  uint32_t calvalue = cal_adc_ch_zero_scale(ch);
+  SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.println(calvalue);
+  SERIALPORT.println("CALIBRATION_FINISHED");
+}
+
+uint32_t cal_adc_ch_zero_scale(int ch)
 {
 
   SPI.transfer(adc, ADC_CHMODE | ch);   // Access ch mode register in write mode
@@ -1247,13 +1278,13 @@ String adc_ch_zero_scale_cal(int ch)
   return readADCzerocal(ch);
 }
 
-String readADCzerocal(byte ch)
+uint32_t readADCzerocal(byte ch)
 {
-  byte b1, b2, b3;
+  uint8_t b1, b2, b3;
   uint32_t calvalue;
-  int n;
-  String buffer;
-  char buffertemp [100];
+  //int n;
+  //String buffer;
+  //char buffertemp [100];
   SPI.transfer(adc, ADC_CHZEROSCALECAL | ADC_REGREAD | ch);   // Access ch zero-scale cal register in read mode
   b1 = SPI.transfer(adc,0x00);   // read byte 1
   b2 = SPI.transfer(adc,0x00);   // read byte 2
@@ -1263,12 +1294,38 @@ String readADCzerocal(byte ch)
   calvalue += b2 << 8;
   calvalue += b3;
 
-  n = snprintf(buffertemp,100,"ch%d,%d",ch,calvalue);
-  buffer = buffertemp;
-  return buffer;
+  //n = snprintf(buffertemp,100,"ch%d,%d",ch,calvalue);
+  //buffer = buffertemp;
+  return calvalue;
 }
 
-String adc_ch_full_scale_cal(int ch)
+void adc_ch_full_sc_cal(InCommand *incommand)
+{
+  if(check_sync(CHECK_CLOCK) != 0)//make sure ADC has a clock
+  {
+    return;
+  }
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t ch = atoi(incommand->token[1]);
+  if(ch >= NUMADCCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  send_ack();
+  uint32_t calvalue = cal_adc_ch_full_scale(ch);
+  SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.println(calvalue);
+  SERIALPORT.println("CALIBRATION_FINISHED");
+}
+
+uint32_t cal_adc_ch_full_scale(uint8_t ch)
 {
   //Put ch in idle mode
   SPI.transfer(adc, ADC_CHMODE | ch); // Access ch mode register in write mode
@@ -1281,14 +1338,11 @@ String adc_ch_full_scale_cal(int ch)
   return readADCfullcal(ch);
 }
 
-String readADCfullcal(byte ch)
+uint32_t readADCfullcal(uint8_t ch)
 {
-  byte b1, b2, b3;
+  uint8_t b1, b2, b3;
   uint32_t calvalue;
-  int n;
-  String buffer;
-  char buffertemp [100];
-
+  
   SPI.transfer(adc, ADC_CHFULLSCALECAL | ADC_REGREAD | ch);   // Access ch full-scale cal register in read mode
   b1 = SPI.transfer(adc,0x00);   // read byte 1
   b2 = SPI.transfer(adc,0x00);   // read byte 2
@@ -1298,10 +1352,64 @@ String readADCfullcal(byte ch)
   calvalue += b2 << 8;
   calvalue += b3;
 
-  n = snprintf(buffertemp,100,"ch%d,%d",ch,calvalue);
-  buffer = buffertemp;
+  return calvalue;
+}
 
-  return buffer;
+void read_adc_cal(InCommand *incommand)
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t ch = atoi(incommand->token[1]);
+  if(ch >= NUMADCCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  send_ack();  
+  SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.print(readADCzerocal(ch));
+  SERIALPORT.print(",");
+  SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.println(readADCfullcal(ch));
+  SERIALPORT.println("READ_FINISHED");
+}
+
+void write_adc_cal(InCommand *incommand)
+{
+  if(incommand->paramcount != 4)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t ch = atoi(incommand->token[1]);
+  if(ch >= NUMADCCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  uint32_t zerocal = atoi(incommand->token[2]);
+  uint32_t fullcal = atoi(incommand->token[3]); 
+
+  if(zerocal > 0xFFFFFF)  
+  {
+    range_error();
+    return;
+  }
+  if(fullcal > 0xFFFFFF)  
+  {
+    range_error();
+    return;
+  }   
+  send_ack();
+  writeADCcal(ch, zerocal, fullcal);
+  SERIALPORT.println("CALIBRATION_CHANGED");
 }
 
 void writeADCcal(byte ch, uint32_t zerocal, uint32_t fullcal)
@@ -1327,14 +1435,34 @@ void writeADCchfullscale(byte ch, int32_t fullscale)
 }
 
 //// DAC ////
+void dac_offset_adj(InCommand *incommand)
+{
+  if(incommand->paramcount != 3)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t ch = atoi(incommand->token[1]);
+  if(ch >= NUMDACCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  float offset = atof(incommand->token[2]);
+  if((offset > (DAC_FULL_SCALE * 2.0 * 16 / 65536.0)) || (offset < (DAC_FULL_SCALE * -2.0 * 15.875 / 65536.0)))
+  {
+    range_error();
+    return;
+  }
+  send_ack();
+  calDACoffset(ch, offset);
+  SERIALPORT.println("CALIBRATION_FINISHED");
+}
 
 void calDACoffset(byte ch, float offset)
 {
   int8_t numsteps;
-  int n;
-  String buffer;
-  char buffertemp [100];
-  float stepsize = (10.0 * 2.0) / (65535.0 * 8.0); //stepsize is 1/8 of a 16-bit LSB
+  float stepsize = (DAC_FULL_SCALE * 2.0) / (65536.0 * 8.0); //stepsize is 1/8 of a 16-bit LSB
 
   if(offset < 0)
   {
@@ -1345,21 +1473,47 @@ void calDACoffset(byte ch, float offset)
     numsteps = (int8_t)((offset / stepsize) + 0.5) * -1;
   }
 
-  n = snprintf(buffertemp,100,"ch%d,%f,%d",ch,stepsize*1000000,numsteps);
-  buffer = buffertemp;
-
-  SERIALPORT.println(buffer);
+  SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.print(stepsize * 1000000);
+  SERIALPORT.print(",");
+  SERIALPORT.println(numsteps);  
   writeDACoffset(ch, numsteps);
+}
+
+void dac_gain_adj(InCommand *incommand)
+{
+  if(incommand->paramcount != 3)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t ch = atoi(incommand->token[1]);
+  if(ch >= NUMDACCHANNELS)
+  {
+    range_error();
+    return;
+  }
+  float offset = atof(incommand->token[2]);
+  if((offset > (DAC_FULL_SCALE * 2.0 * 16 / 65536.0)) || (offset < (DAC_FULL_SCALE * -2.0 * 15 / 65536.0)))
+  {
+    range_error();
+    return;
+  }
+  send_ack();
+  calDACgain(ch, offset);
+  SERIALPORT.println("CALIBRATION_FINISHED");
 }
 
 void calDACgain(byte ch, float offset)
 // offset is measured relative to ideal negative full scale voltage (usually -10V)
 {
   int8_t numsteps;
-  int n;
-  String buffer;
-  char buffertemp [100];
-  float stepsize = (10.0 * 2.0) / (65535.0 * 2.0); //stepsize is 1/2 of a 16-bit LSB
+  //int n;
+  //String buffer;
+  //char buffertemp [100];
+  float stepsize = (DAC_FULL_SCALE * 2.0) / (65536.0 * 2.0); //stepsize is 1/2 of a 16-bit LSB
   numsteps = (int8_t)(offset / stepsize);
 
   if(offset < 0)
@@ -1371,10 +1525,15 @@ void calDACgain(byte ch, float offset)
     numsteps = (int8_t)((offset / stepsize) + 0.5);
   }
 
-  n = snprintf(buffertemp,100,"ch%d,%f,%d",ch,stepsize*1000000,numsteps);
-  buffer = buffertemp;
-
-  SERIALPORT.println(buffer);
+  //n = snprintf(buffertemp,100,"ch%d,%f,%d",ch,stepsize*1000000,numsteps);
+  //buffer = buffertemp;
+  SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.print(stepsize * 1000000);
+  SERIALPORT.print(",");
+  SERIALPORT.println(numsteps);  
+  
   writeDACgain(ch, numsteps);
 }
 
