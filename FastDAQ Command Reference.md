@@ -54,7 +54,9 @@ Returns:
 
 ## RAMP_SMART
 
-Ramps one DAC channel to a specified setpoint **in mV** at a given ramprate in 1ms steps. It looks up the current DAC value internally to make sure there are no sudden jumps in voltage. Internally it calls RAMP1 to do the actual ramp. 
+Ramps one DAC channel to a specified setpoint **in mV** at a given ramprate in 1ms steps. It looks up the current DAC value internally to make sure there are no sudden jumps in voltage. Internally it calls RAMP1 to do the actual ramp.
+
+A ramp can be stopped at any time by sending the command `STOP`.
 
 Syntax:  
 `RAMP_SMART,{dac_channel},{setpoint},{ramprate in mV/s}`
@@ -98,7 +100,7 @@ Example (read from ADC channels 0, 2, and 3 for 3000 samples each):
 `SPEC_ANA,023,3000`
 
 Returns:  
-`{# of samples x number of selected adc channels x 16-bit integer samples}RAMP_FINISHED`
+`{# of samples x number of selected adc channels x 16-bit integer samples}READ_FINISHED`
 
 ## CONVERT_TIME
 
