@@ -39,7 +39,7 @@
 
 #define DACSETTLETIME  1//milliseconds to wait before starting ramp
 
-#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
+//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
@@ -100,9 +100,6 @@ volatile int32_t g_DACendpoint[NUMDACCHANNELS];
 volatile int64_t g_DACstep[NUMDACCHANNELS];
 volatile uint32_t g_numsteps;
 volatile uint32_t g_stepcount = 0;
-
-
-
 
 typedef struct InCommand
 {
@@ -332,7 +329,7 @@ void router(InCommand *incommand)
   }
   else if(strcmp("INT_RAMP", cmd) == 0)  
   {  
-    intRamp(incommand);
+    int_ramp(incommand);
   }
   else if(strcmp("SPEC_ANA", cmd) == 0)  
   {  
@@ -424,39 +421,31 @@ void router(InCommand *incommand)
   }
   else if(strcmp("START_PID", cmd) == 0)
   {  
-    if(sync_check(CHECK_CLOCK | CHECK_SYNC) == 0)
-    {
-      //start_pid(DB);
-      //SERIALPORT.println("PID_FINISHED");
-    }
+    start_pid(incommand);    
   }
   else if(strcmp("STOP_PID", cmd) == 0)  
   {  
-    //stop_pid(DB);
+    stop_pid(incommand);
   }
   else if(strcmp("SET_PID_TUNE", cmd) == 0)
   {  
-    //set_pid_tune(DB);
+    set_pid_tune(incommand);
   }
   else if(strcmp("SET_PID_SETP", cmd) == 0)
   {  
-    //set_pid_setp(DB);
+    set_pid_setp(incommand);
   }
   else if(strcmp("SET_PID_LIMS", cmd) == 0)
   {  
-    //set_pid_lims(DB);
+    set_pid_lims(incommand);
   }
   else if(strcmp("SET_PID_DIR", cmd) == 0)
   {  
-    //set_pid_dir(DB);
+    set_pid_dir(incommand);
   }
   else if(strcmp("SET_PID_SLEW", cmd) == 0)
   {  
-    //if(DB.size() != 2)
-    //{
-     // SERIALPORT.println("SYNTAX ERROR");      
-    //}
-    //set_pid_slew(DB[1].toFloat());   
+    set_pid_slew(incommand);   
   }
   else
   {
@@ -650,7 +639,7 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
   return;
 }
 
-void intRamp(InCommand *incommand)
+void int_ramp(InCommand *incommand)
 {
   int i;
     //check for minimum number of parameters
@@ -667,8 +656,10 @@ void intRamp(InCommand *incommand)
 
   //String channelsDAC = DB[1];
   //g_numrampDACchannels = channelsDAC.length();
-  g_numrampDACchannels = strlen(incommand->token[1]);  
-  g_numrampADCchannels = strlen(incommand->token[2]);
+  char * channelsDAC = incommand->token[1];
+  char * channelsADC = incommand->token[2];
+  g_numrampDACchannels = strlen(channelsDAC);  
+  g_numrampADCchannels = strlen(channelsADC);
 
   g_done = false;
   g_stepcount = 0;
@@ -682,7 +673,7 @@ void intRamp(InCommand *incommand)
   for(i = 0; i < g_numrampDACchannels; i++)
   {
     //g_DACchanselect[i] = channelsDAC[i] - '0';
-    g_DACchanselect[i] = incommand->token[1][i] - '0';
+    g_DACchanselect[i] = channelsDAC[i] - '0';
     if(g_DACchanselect[i] >= NUMDACCHANNELS)
     {
       range_error();
@@ -701,7 +692,7 @@ void intRamp(InCommand *incommand)
   //define ADC channels and check range
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
   {  
-    g_ADCchanselect[i] = incommand->token[2][i] - '0';
+    g_ADCchanselect[i] = channelsADC[i] - '0';
     if(g_ADCchanselect[i] >= NUMADCCHANNELS)
     {
       range_error();
@@ -744,14 +735,6 @@ void intRamp(InCommand *incommand)
 
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
   {
-    /*
-    g_ADCchanselect[i] = incommand->token[2][i] - '0';
-    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
-    {
-      range_error();
-      return;
-    } 
-    */   
     SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
     SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
     SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
@@ -817,7 +800,8 @@ void spec_ana(InCommand * incommand)
     return;
   }
   //String channelsADC = DB[1];
-  g_numrampADCchannels = strlen(incommand->token[1]);
+  char * channelsADC = incommand->token[1];
+  g_numrampADCchannels = strlen(channelsADC);
   g_numsteps=atoi(incommand->token[2]);
 
   g_done = false;
@@ -834,7 +818,7 @@ void spec_ana(InCommand * incommand)
   //select ADC channels and check range
   for(i = 0; i < g_numrampADCchannels; i++)
   {
-    g_ADCchanselect[i] = incommand->token[1][i] - '0';
+    g_ADCchanselect[i] = channelsADC[i] - '0';
     if(g_ADCchanselect[i] >= NUMADCCHANNELS)
     {
       range_error();
@@ -942,8 +926,13 @@ void writetobuffer()
 ///////////////////////////
 
 //Start PID, currently DAC0 and ADC0, no inputs params, just starts
-void start_pid(std::vector<String> DB)
+void start_pid(InCommand *incommand)
 {
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0)
+  {
+    return;
+  }
+  
   g_pidparam[0].dacout = readDAC(g_pidparam[0].DACchan);//Start from current dac setpoint
   g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
   
@@ -951,7 +940,7 @@ void start_pid(std::vector<String> DB)
   
   pid0.SetSampleTime(g_pidparam[0].sampletime);
 
-  set_pid_slew(g_pidparam[0].slewlimit);//has to occur after setting sample time
+  slew_pid_set(g_pidparam[0].slewlimit);//has to occur after setting sample time
   
   if(g_pidparam[0].forward_dir == false)
   {
@@ -961,7 +950,7 @@ void start_pid(std::vector<String> DB)
   {
     pid0.SetControllerDirection(DIRECT);
   }
-  
+  send_ack();
   pid0.SetMode(AUTOMATIC);
   pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);
   
@@ -1023,12 +1012,10 @@ void pidint(void)
     }
     
   }
-  
-
 }
 
 //Stop PID, no inputs params, just stops 
-void stop_pid(std::vector<String> DB)
+void stop_pid(InCommand * incommand)
 {
   uint8_t i = 0;
   pid0.SetMode(MANUAL);
@@ -1043,57 +1030,94 @@ void stop_pid(std::vector<String> DB)
   SPI.transfer(adc, ADC_CHMODE | i);   //Access channel mode register
   SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
   }
+  send_ack();
 }
 //SET_PID_TUNE,<P-coeff>,<I-coeff>,<D-coeff>
 
-void set_pid_tune(std::vector<String> DB)
+void set_pid_tune(InCommand * incommand)
 {
 
-  if(DB.size() != 4)
+  if(incommand->paramcount != 4)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }
-  g_pidparam[0].kp = DB[1].toFloat();
-  g_pidparam[0].ki = DB[2].toFloat();
-  g_pidparam[0].kd = DB[3].toFloat();
+  if(pid0.GetMode() == MANUAL)
+  {
+    send_ack();
+  }
+  
+  //g_pidparam[0].kp = DB[1].toFloat();
+  //g_pidparam[0].ki = DB[2].toFloat();
+  //g_pidparam[0].kd = DB[3].toFloat();
+  
+  g_pidparam[0].kp = atof(incommand->token[1]);
+  g_pidparam[0].ki = atof(incommand->token[2]);
+  g_pidparam[0].kd = atof(incommand->token[3]);
   pid0.SetTunings(g_pidparam[0].kp, g_pidparam[0].ki, g_pidparam[0].kd);    
 }
 
 //SET_PID_SETP,<Setpoint in mV>
-void set_pid_setp(std::vector<String> DB)
+void set_pid_setp(InCommand *incommand)
 {
-  if(DB.size() != 2)
+  if(incommand->paramcount != 2)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }
-  g_pidparam[0].setpoint = DB[1].toFloat();  
+  if(pid0.GetMode() == MANUAL)
+  {
+    send_ack();
+  }
+  //g_pidparam[0].setpoint = DB[1].toFloat();  
+  g_pidparam[0].setpoint = atof(incommand->token[1]);
 }
 
 //SET_PID_LIMS,<Lower limit in mV>,<Upper limit in mV>
-void set_pid_lims(std::vector<String> DB)
+void set_pid_lims(InCommand *incommand)
 {
-  if(DB.size() != 3)
+  if(incommand->paramcount != 3)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }
-  g_pidparam[0].dacmin = DB[1].toFloat();
-  g_pidparam[0].dacmax = DB[2].toFloat();
   
+  //g_pidparam[0].dacmin = DB[1].toFloat();
+  //g_pidparam[0].dacmax = DB[2].toFloat();
+  g_pidparam[0].dacmin = atof(incommand->token[1]);
+  g_pidparam[0].dacmax = atof(incommand->token[2]);
+  if((abs(g_pidparam[0].dacmin) / 1000.0 > DAC_FULL_SCALE) || (abs(g_pidparam[0].dacmax) / 1000.0 > DAC_FULL_SCALE))
+  {
+    range_error();
+    return;
+  }
+  if(g_pidparam[0].dacmin > g_pidparam[0].dacmax)
+  {
+    range_error();
+    return;
+  }
+  if(pid0.GetMode() == MANUAL)
+  {
+    send_ack();
+  }
   pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);    
 }
 
 //SET_PID_DIR,<1 for forward, 0 for reverse>
-void set_pid_dir(std::vector<String> DB)
+void set_pid_dir(InCommand *incommand)
 {
-  if(DB.size() != 2)
+  if(incommand->paramcount != 2)
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
     return;
   }
-  if(DB[1].toInt() == 0)
+
+  if(pid0.GetMode() == MANUAL)
+  {
+    send_ack();
+  }
+
+  if(atoi(incommand->token[1]) == 0)
   {
     g_pidparam[0].forward_dir = false;
     pid0.SetControllerDirection(REVERSE);
@@ -1106,11 +1130,30 @@ void set_pid_dir(std::vector<String> DB)
 }
 
 //SET_PID_SLEW,<maximum slewrete in mV per second>
-void set_pid_slew(float slewlimit)
+
+void set_pid_slew(InCommand * incommand)
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  float slew = atof(incommand->token[1]);
+  if(slew < 0.0)
+  {
+    range_error();
+  }
+  if(pid0.GetMode() == MANUAL)
+  {
+    send_ack();
+  }
+  slew_pid_set(slew);
+}
+
+void slew_pid_set(float slewlimit)
 {
   if(slewlimit < 0)
   {
-    SERIALPORT.println("SYNTAX ERROR");
     return;
   }    
   g_pidparam[0].slewlimit = slewlimit;
@@ -2261,14 +2304,21 @@ void awg_ramp(InCommand *incommand)
   for(i = 0; i < g_numwaves; i++)
   {
     //String channelswave = DB[i + 2];
+    char * channelswave = incommand->token[i + 2];
     //g_awgwave[i].numDACchannels = channelswave.length();
-    g_awgwave[i].numDACchannels = strlen(incommand->token[i + 2]);
+    g_awgwave[i].numDACchannels = strlen(channelswave);
     g_awgwave[i].samplecount = 0;
     g_awgwave[i].setpointcount = 0;
     for(j = 0; j < g_awgwave[i].numDACchannels; j++)
     {
       //g_awgwave[i].DACchanselect[j] = channelswave[j] - '0';
-      g_awgwave[i].DACchanselect[j] = incommand->token[i + 2][j] - '0';
+      uint8_t wavedac = channelswave[j] - '0';
+      if(wavedac >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      g_awgwave[i].DACchanselect[j] = wavedac;
     }
   }
 
@@ -2325,16 +2375,48 @@ void awg_ramp(InCommand *incommand)
   SERIALPORT.println(g_numloops);
   SERIALPORT.print("Numsteps: ");  
   SERIALPORT.println(g_numsteps);
-#endif  
+#endif
+  //define DAC channels and check range  
   for(i = 0; i < g_numrampDACchannels; i++)
   {
     g_DACchanselect[i] = channelsDAC[i] - '0';
+    if(g_DACchanselect[i] >= NUMDACCHANNELS)
+    {
+      range_error();
+      return;
+    }
+    float dacstartvoltage = atof(incommand->token[i+4+g_numwaves])/1000.0;
+    float dacendvoltage = atof(incommand->token[i+4+g_numwaves+g_numrampDACchannels])/1000.0;
+    if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
+    {
+      range_error();
+      return;
+    }
+    g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+    g_DACendpoint[i] = voltageToInt32(dacendvoltage);   
+  }
+  
+  //define ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
+  {  
+    g_ADCchanselect[i] = channelsADC[i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+
+  //configure DAC channels
+  for(i = 0; i < g_numrampDACchannels; i++)
+  {
+    //g_DACchanselect[i] = channelsDAC[i] - '0';
     //g_DACstartpoint[i] = voltageToInt32(DB[i+4+g_numwaves].toFloat()/1000.0);
-    g_DACstartpoint[i] = voltageToInt32(atof(incommand->token[i+4+g_numwaves])/1000.0);
+    //g_DACstartpoint[i] = voltageToInt32(atof(incommand->token[i+4+g_numwaves])/1000.0);
 
     g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
     //g_DACendpoint[i] = voltageToInt32(DB[i+4+g_numwaves+g_numrampDACchannels].toFloat()/1000.0);
-    g_DACendpoint[i] = voltageToInt32(atof(incommand->token[i+4+g_numwaves+g_numrampDACchannels])/1000.0);
+    //g_DACendpoint[i] = voltageToInt32(atof(incommand->token[i+4+g_numwaves+g_numrampDACchannels])/1000.0);
     if(g_numsteps < 2) //handle numsteps < 2
     {
       g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31));
@@ -2374,7 +2456,7 @@ void awg_ramp(InCommand *incommand)
 
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
   {
-    g_ADCchanselect[i] = channelsADC[i] - '0';
+    //g_ADCchanselect[i] = channelsADC[i] - '0';
     SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
     SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
     SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
@@ -2389,28 +2471,24 @@ void awg_ramp(InCommand *incommand)
 
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
-
+  send_ack();  
   delayMicroseconds(1000); // wait for DACs to settle
   digitalWrite(data,HIGH);
 
   attachInterrupt(digitalPinToInterrupt(drdy), awgint, FALLING);
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
-  
+
   while(!g_done)
   {
-    if(SERIALPORT.available())
+    if(query_serial(incommand))
     {
-      /*
-      std::vector<String> comm;
-      comm = query_serial();
-      if(comm[0] == "STOP")
+      if(strcmp("STOP", incommand->token[0]) == 0)
       {
         break;
-      }
-      */
+      }     
     }
-  }
+  }  
   detachInterrupt(digitalPinToInterrupt(drdy));
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input

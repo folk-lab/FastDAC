@@ -425,9 +425,13 @@ Example:
 Returns:  
 Nothing
 
-## SET_PID_TUNE
+## PID TUNING COMMANDS
 
-`SET_PID_TUNE` allows setting the proportional, integral, and derivative coefficients of the PID controller.
+The following commands will not send an `ACK` if the PID is running, to facilitate live tuning without corrupting the data stream.
+
+### SET_PID_TUNE
+
+`SET_PID_TUNE` allows setting the proportional, integral, and derivative coefficients of the PID controller. 
 
 Syntax:  
 `SET_PID_TUNE,{P-coeff},{I-coeff},{D-coeff}`
@@ -438,7 +442,7 @@ Example:
 Returns:  
 Nothing
 
-## SET_PID_SETP
+### SET_PID_SETP
 
 `SET_PID_SETP` sets the value in mV that the controller should try to achieve at the input ADC 0.
 
@@ -451,7 +455,7 @@ Example:
 Returns:  
 Nothing
 
-## SET_PID_LIMS
+### SET_PID_LIMS
 
 `SET_PID_LIMS` sets the minimum and maximum values in mV that the DAC 0 output should not exceed.
 
@@ -464,9 +468,9 @@ Example:
 Returns:  
 Nothing
 
-## SET_PID_DIR
+### SET_PID_DIR
 
-`SET_PID_DIR` defines the polarity for the output of the PID controller
+`SET_PID_DIR` defines the polarity for the output of the PID controller.
 
 Syntax:  
 `SET_PID_DIR,{0 for Reverse, 1 for Forward}`
@@ -477,7 +481,7 @@ Example:
 Returns:  
 Nothing
 
-## SET_PID_SLEW
+### SET_PID_SLEW
 
 `SET_PID_SLEW` configures the slew rate limit for the output that will be enforced regardless of the calculated output from the controller.
 
