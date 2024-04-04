@@ -52,14 +52,6 @@
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART, try to stay as integer divisor of 84MHz mclk
 
-const int Noperations = 37;
-char * operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
-"READ_CONVERT_TIME", "CAL_ADC_WITH_DAC", "ADC_ZERO_SC_CAL", "ADC_CH_ZERO_SC_CAL", "ADC_CH_FULL_SC_CAL", "READ_ADC_CAL", "WRITE_ADC_CAL", "DAC_OFFSET_ADJ", 
-"DAC_GAIN_ADJ", "DAC_RESET_CAL", "DEFAULT_CAL", "FULL_SCALE", "SET_MODE", "ARM_SYNC", "DISARM_SYNC", "CHECK_SYNC", "ADD_WAVE", "CLR_WAVE", "CHECK_WAVE", "AWG_RAMP",
-"START_PID", "STOP_PID", "SET_PID_TUNE", "SET_PID_SETP", "SET_PID_LIMS", "SET_PID_DIR", "SET_PID_SLEW"};
-
-
-
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
 bool g_clock_synced = false;
@@ -313,182 +305,164 @@ void loop()
 
 void router(InCommand *incommand)
 {
-  float v;
-  int operation = indexOfOperation(incommand);
-  switch(operation)
+  char * cmd = incommand->token[0];
+  if(strcmp("*IDN?", cmd) == 0)
   {
-    case 0: // NOP
-    SERIALPORT.println("NOP");
-    break;
-
-    case 1: // *IDN?    
     idn();
-    break;
-
-    case 2: // *RDY?
+  }
+  else if(strcmp("*RDY?", cmd) == 0)
+  {
     rdy();
-    break;
-
-    case 3: // RESET
+  }
+  else if(strcmp("RESET", cmd) == 0)
+  {
     resetADC();
-    break;
-
-    case 4: // GET_DAC
+  }
+  else if(strcmp("GET_DAC", cmd) == 0)
+  {
     get_dac(incommand);
-    break;
-  
-    case 5: // GET_ADC
+  }
+  else if(strcmp("GET_ADC", cmd) == 0)
+  {
     get_adc(incommand);
-    break;
-  
-    case 6: // RAMP_SMART
+  }
+  else if(strcmp("RAMP_SMART", cmd) == 0)
+  {  
     ramp_smart(incommand);
-    break;
-    
-    case 7: // INT_RAMP
+  }
+  else if(strcmp("INT_RAMP", cmd) == 0)  
+  {  
     intRamp(incommand);
-    break;
-    
-    case 8: // SPEC_ANA
+  }
+  else if(strcmp("SPEC_ANA", cmd) == 0)  
+  {  
     spec_ana(incommand);
-    break;
-    
-    case 9: // CONVERT_TIME
+  }
+  else if(strcmp("CONVERT_TIME", cmd) == 0)  
+  {  
     convert_time(incommand);
-    break;
-  
-    case 10: // READ_CONVERT_TIME
+  }
+  else if(strcmp("READ_CONVERT_TIME", cmd) == 0)
+  {  
     read_convert_time(incommand);
-    break;
-    
-    case 11: // CAL_ADC_WITH_DAC
+  }
+  else if(strcmp("CAL_ADC_WITH_DAC", cmd) == 0)  
+  {  
     cal_adc_with_dac(incommand);
-    break;
-
-    case 12: // ADC_ZERO_SC_CAL
+  }
+  else if(strcmp("ADC_ZERO_SC_CAL", cmd) == 0)
+  {  
     adc_zero_sc_cal(incommand);
-    break;
-
-    case 13: // ADC_CH_ZERO_SC_CAL
+  }
+  else if(strcmp("ADC_CH_ZERO_SC_CAL", cmd) == 0)
+  {
     adc_ch_zero_sc_cal(incommand);        
-    break;
-
-    case 14: // ADC_CH_FULL_SC_CAL
+  }
+  else if(strcmp("ADC_CH_FULL_SC_CAL", cmd) == 0)
+  {  
     adc_ch_full_sc_cal(incommand);
-    break;
-    
-    case 15: // READ_ADC_CAL
+  }
+  else if(strcmp("READ_ADC_CAL", cmd) == 0)  
+  {  
     read_adc_cal(incommand);
-    break;
-    
-    case 16: // WRITE_ADC_CAL
+  }
+  else if(strcmp("WRITE_ADC_CAL", cmd) == 0)  
+  {  
     write_adc_cal(incommand);
-    break;
-    
-    case 17: // DAC_OFFSET_ADJ
+  }
+  else if(strcmp("DAC_OFFSET_ADJ", cmd) == 0)  
+  {  
     dac_offset_adj(incommand);
-    break;
-    
-    case 18: // DAC_GAIN_ADJ
+  }
+  else if(strcmp("DAC_GAIN_ADJ", cmd) == 0)  
+  {  
     dac_gain_adj(incommand);
-    break;
-    
-    case 19: // DAC_RESET_CAL
+  }
+  else if(strcmp("DAC_RESET_CAL", cmd) == 0)  
+  {  
     dac_reset_cal(incommand);
-    break;
-    
-    case 20: // DEFAULT_CAL
+  }
+  else if(strcmp("DEFAULT_CAL", cmd) == 0)  
+  {  
     default_cal(incommand);
-    break;
-    
-    case 21: // FULL_SCALE
+  }
+  else if(strcmp("FULL_SCALE", cmd) == 0)  
+  {  
     full_scale(incommand);
-    break;
-    
-    case 22: //SET_MODE
+  }
+  else if(strcmp("SET_MODE", cmd) == 0)  
+  {  
     set_mode(incommand);
-    break;
-    
-    case 23: //ARM_SYNC
+  }
+  else if(strcmp("ARM_SYNC", cmd) == 0)  
+  {  
     arm_sync(incommand);
-    break;
-
-    case 24: //DISARM_SYNC
+  }
+  else if(strcmp("DISARM_SYNC", cmd) == 0)
+  {  
     disarm_sync(incommand);
-    break;
-    
-    case 25: //CHECK_SYNC
+  }
+  else if(strcmp("CHECK_SYNC", cmd) == 0)  
+  {  
     check_sync(incommand);
-    break;
-    
-    case 26: //ADD_WAVE
+  }
+  else if(strcmp("ADD_WAVE", cmd) == 0)  
+  {  
     add_wave(incommand);
-    break;
-    
-    case 27: //CLR_WAVE
+  }
+  else if(strcmp("CLR_WAVE", cmd) == 0)  
+  {  
     clr_wave(incommand);
-    break;
-    
-    case 28: //CHECK_WAVE
+  }
+  else if(strcmp("CHECK_WAVE", cmd) == 0)  
+  { 
     check_wave(incommand);
-    break;
-    
-    case 29: //AWG_RAMP
+  }
+  else if(strcmp("AWG_RAMP", cmd) == 0)  
+  {  
     awg_ramp(incommand);
-    break;
-    /*
-    case 30: //START_PID
+  }
+  else if(strcmp("START_PID", cmd) == 0)
+  {  
     if(sync_check(CHECK_CLOCK | CHECK_SYNC) == 0)
     {
-      start_pid(DB);
+      //start_pid(DB);
       //SERIALPORT.println("PID_FINISHED");
     }
-    break;
-    
-    case 31: //STOP_PID
-    stop_pid(DB);
-    break;
-
-    case 32://SET_PID_TUNE
-    set_pid_tune(DB);
-    break;
-
-    case 33://SET_PID_SETP
-    set_pid_setp(DB);
-    break;
-
-    case 34://SET_PID_LIMS
-    set_pid_lims(DB);
-    break;
-
-    case 35://SET_PID_DIR
-    set_pid_dir(DB);
-    break;
-
-    case 36://SET_PID_SLEW
-    if(DB.size() != 2)
-    {
-      SERIALPORT.println("SYNTAX ERROR");
-      break;
-    }
-    set_pid_slew(DB[1].toFloat());
-    break;
-    */
-    default:
-    break;
   }
-}
-
-int indexOfOperation(InCommand *incommand)
-{
-  for(int index = 0; index < Noperations; index++)
+  else if(strcmp("STOP_PID", cmd) == 0)  
+  {  
+    //stop_pid(DB);
+  }
+  else if(strcmp("SET_PID_TUNE", cmd) == 0)
+  {  
+    //set_pid_tune(DB);
+  }
+  else if(strcmp("SET_PID_SETP", cmd) == 0)
+  {  
+    //set_pid_setp(DB);
+  }
+  else if(strcmp("SET_PID_LIMS", cmd) == 0)
+  {  
+    //set_pid_lims(DB);
+  }
+  else if(strcmp("SET_PID_DIR", cmd) == 0)
+  {  
+    //set_pid_dir(DB);
+  }
+  else if(strcmp("SET_PID_SLEW", cmd) == 0)
+  {  
+    //if(DB.size() != 2)
+    //{
+     // SERIALPORT.println("SYNTAX ERROR");      
+    //}
+    //set_pid_slew(DB[1].toFloat());   
+  }
+  else
   {
-    if(strcmp(operations[index],incommand->token[0]) == 0)
-    {
-      return index;
-    }
-  }
-  return 0;
+    SERIALPORT.println("NOP");
+  } 
+
 }
 
 ///////////////////
@@ -2268,6 +2242,7 @@ void awg_ramp(InCommand *incommand)
   {
     return;
   }
+  //Do some initial bounds checking
   if(incommand->paramcount < 9)
   {
     range_error();
