@@ -8,6 +8,9 @@
 //Main code units changed to mV & several new functions added (RAMP_SMART,INT_RAMP & SPEC_ANA)
 //Most original functions (UCSB) are either removed or replaced.
 
+//Modified for new PC orchestrator service, extra checks for out-of-bounds array indexing
+//Switched use of String class to c strings to have better control over RAM usage, April 2024
+
 ////////////////
 //// SETUP ////
 ///////////////
@@ -47,9 +50,7 @@
 #define SERIALPORT SerialUSB
 #endif
 
-#define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
-
-#define COMMWAIT 2//Milliseconds to wait after receiving a command before purging port, should be at least 1 char length
+#define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART, try to stay as integer divisor of 84MHz mclk
 
 const int Noperations = 37;
 char * operations[Noperations] = {"NOP", "*IDN?", "*RDY?", "RESET", "GET_DAC", "GET_ADC", "RAMP_SMART", "INT_RAMP", "SPEC_ANA", "CONVERT_TIME", 
@@ -423,23 +424,19 @@ void router(InCommand *incommand)
     case 26: //ADD_WAVE
     add_wave(incommand);
     break;
-    /*
+    
     case 27: //CLR_WAVE
-    clr_wave(DB);
-    break;
-
-    case 28: //CHECK_WAVE
-    check_wave(DB);
-    break;
-
-    case 29: //AWG_RAMP
-    if(sync_check(CHECK_CLOCK | CHECK_SYNC) == 0)
-    {
-      awg_ramp(DB);
-      SERIALPORT.println("RAMP_FINISHED");
-    }
+    clr_wave(incommand);
     break;
     
+    case 28: //CHECK_WAVE
+    check_wave(incommand);
+    break;
+    
+    case 29: //AWG_RAMP
+    awg_ramp(incommand);
+    break;
+    /*
     case 30: //START_PID
     if(sync_check(CHECK_CLOCK | CHECK_SYNC) == 0)
     {
@@ -2202,23 +2199,58 @@ void add_wave(InCommand *incommand)
 #endif
 }
 
-//CHECK_WAVE,<wave number>
-//Returns WAVE,<wave number>,<total number of setpoints>,<total number of samples>
-void check_wave(std::vector<String> DB) 
+
+//CLR_WAVE,<wave number>
+//Returns WAVE,<wave number>,0
+void clr_wave(InCommand *incommand)
 {
-  uint8_t wavenumber = DB[1].toInt();
-  int32_t totalsamples = 0;  
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  //uint8_t wavenumber = DB[1].toInt();
+  uint8_t wavenumber = atoi(incommand->token[1]);
   if(wavenumber >= AWGMAXWAVES)
   {
-    SERIALPORT.print("ERROR, Max waveforms = ");
-    SERIALPORT.println(AWGMAXWAVES);
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
+    range_error();
+    return;
+  }
+  send_ack();
+  g_awgwave[wavenumber].numsetpoints = 0;
+  
+  SERIALPORT.print("WAVE,");
+  SERIALPORT.print(wavenumber);
+  SERIALPORT.println(",0");   
+  
+}
+
+//CHECK_WAVE,<wave number>
+//Returns WAVE,<wave number>,<total number of setpoints>,<total number of samples>
+void check_wave(InCommand *incommand) 
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  //uint8_t wavenumber = DB[1].toInt();
+  uint8_t wavenumber = atoi(incommand->token[1]);
+  uint32_t totalsamples = 0;  
+  if(wavenumber >= AWGMAXWAVES)
+  {
+    range_error();
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
     return;
   }
   for(uint32_t i = 0; i < g_awgwave[wavenumber].numsetpoints; i++)
   {
     totalsamples += (g_awgwave[wavenumber].numsamples[i]);
   }
-
+  send_ack();
   SERIALPORT.print("WAVE,");
   SERIALPORT.print(wavenumber);
   SERIALPORT.print(",");
@@ -2228,44 +2260,40 @@ void check_wave(std::vector<String> DB)
 }
 
 
-
-void clr_wave(std::vector<String> DB)
+//AWG_RAMP,<numwaves>,<dacs waveform 0>,<dacs waveform n>,<dacs to ramp>,<adcs>,<initial dac voltage 1>,<…>,<initial dac voltage n>,
+//<final dac voltage 1>,<…>,<final dac voltage n>,<# of waveform repetitions at each ramp step>,<# of ramp steps>
+void awg_ramp(InCommand *incommand)
 {
-  uint8_t wavenumber = DB[1].toInt();
-  if(wavenumber >= AWGMAXWAVES)
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0)
   {
-    SERIALPORT.print("ERROR, Max waveforms = ");
-    SERIALPORT.println(AWGMAXWAVES);
     return;
   }
-  
-  g_awgwave[wavenumber].numsetpoints = 0;
-  
-  SERIALPORT.print("WAVE,");
-  SERIALPORT.print(wavenumber);
-  SERIALPORT.println(",0");   
-  
-}
-//AWG_RAMP,<numwaves>,<dacs waveform 0>,<dacs waveform n>,<dacs to ramp>,<adcs>,<initial dac voltage 1>,<…>,<initial dac voltage n>,<final dac voltage 1>,<…>,<final dac voltage n>,<# of waveform repetitions at each ramp step>,<# of ramp steps>
-void awg_ramp(std::vector<String> DB)
-{
+  if(incommand->paramcount < 9)
+  {
+    range_error();
+    return;
+  }
   int i, j;
-  g_numwaves = DB[1].toInt(); //First parameter
+  //g_numwaves = DB[1].toInt(); //First parameter
+  g_numwaves = atoi(incommand->token[1]); //First parameter
   if(g_numwaves > AWGMAXWAVES)
   {
-    SERIALPORT.print("ERROR, Max waveforms = ");
-    SERIALPORT.println(AWGMAXWAVES);
+    range_error();
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
     return;
   }
   for(i = 0; i < g_numwaves; i++)
   {
-    String channelswave = DB[i + 2];
-    g_awgwave[i].numDACchannels = channelswave.length();
+    //String channelswave = DB[i + 2];
+    //g_awgwave[i].numDACchannels = channelswave.length();
+    g_awgwave[i].numDACchannels = strlen(incommand->token[i + 2]);
     g_awgwave[i].samplecount = 0;
     g_awgwave[i].setpointcount = 0;
     for(j = 0; j < g_awgwave[i].numDACchannels; j++)
     {
-      g_awgwave[i].DACchanselect[j] = channelswave[j] - '0';
+      //g_awgwave[i].DACchanselect[j] = channelswave[j] - '0';
+      g_awgwave[i].DACchanselect[j] = incommand->token[i + 2][j] - '0';
     }
   }
 
@@ -2286,18 +2314,25 @@ void awg_ramp(std::vector<String> DB)
   }
 #endif
        
-  String channelsDAC = DB[g_numwaves + 2];
-  g_numrampDACchannels = channelsDAC.length();
-  String channelsADC = DB[g_numwaves + 3];
-  g_numrampADCchannels = channelsADC.length();
+  //String channelsDAC = DB[g_numwaves + 2];
+  //g_numrampDACchannels = channelsDAC.length();
+  char * channelsDAC = incommand->token[g_numwaves + 2];
+  g_numrampDACchannels = strlen(channelsDAC);
+
+  //String channelsADC = DB[g_numwaves + 3];
+  //g_numrampADCchannels = channelsADC.length();
+  char * channelsADC = incommand->token[g_numwaves + 3];
+  g_numrampADCchannels = strlen(channelsADC);
 
   g_done = false;
   g_firstsamples = true;
   
   //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 6 + g_numwaves))
+  //if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 6 + g_numwaves))
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)incommand->paramcount != g_numrampDACchannels * 2 + 6 + g_numwaves))
   {
-    SERIALPORT.println("SYNTAX ERROR");
+    syntax_error();
+    //SERIALPORT.println("SYNTAX ERROR");
     return;
   }  
 
@@ -2305,8 +2340,10 @@ void awg_ramp(std::vector<String> DB)
   g_stepcount = 0;
   g_nextloop = false;
    
-  g_numloops=(DB[g_numrampDACchannels*2+4+g_numwaves].toInt());
-  g_numsteps=(DB[g_numrampDACchannels*2+5+g_numwaves].toInt());
+  //g_numloops=(DB[g_numrampDACchannels*2+4+g_numwaves].toInt());
+  g_numloops=atoi(incommand->token[g_numrampDACchannels*2+4+g_numwaves]);
+  //g_numsteps=(DB[g_numrampDACchannels*2+5+g_numwaves].toInt());
+  g_numsteps=atoi(incommand->token[g_numrampDACchannels*2+5+g_numwaves]);
 
 #ifdef DEBUGRAMP
   SERIALPORT.print("Numloops: ");  
@@ -2317,10 +2354,12 @@ void awg_ramp(std::vector<String> DB)
   for(i = 0; i < g_numrampDACchannels; i++)
   {
     g_DACchanselect[i] = channelsDAC[i] - '0';
-    g_DACstartpoint[i] = voltageToInt32(DB[i+4+g_numwaves].toFloat()/1000.0);
-    //g_DACramppoint[i] = g_DACstartpoint[i];
+    //g_DACstartpoint[i] = voltageToInt32(DB[i+4+g_numwaves].toFloat()/1000.0);
+    g_DACstartpoint[i] = voltageToInt32(atof(incommand->token[i+4+g_numwaves])/1000.0);
+
     g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
-    g_DACendpoint[i] = voltageToInt32(DB[i+4+g_numwaves+g_numrampDACchannels].toFloat()/1000.0);
+    //g_DACendpoint[i] = voltageToInt32(DB[i+4+g_numwaves+g_numrampDACchannels].toFloat()/1000.0);
+    g_DACendpoint[i] = voltageToInt32(atof(incommand->token[i+4+g_numwaves+g_numrampDACchannels])/1000.0);
     if(g_numsteps < 2) //handle numsteps < 2
     {
       g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31));
@@ -2408,6 +2447,7 @@ void awg_ramp(std::vector<String> DB)
   SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
   }
   digitalWrite(data,LOW);
+  SERIALPORT.println("RAMP_FINISHED");
 }
 
 void awgint()//interrupt for AWG ramp
