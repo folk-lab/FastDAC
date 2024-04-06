@@ -24,6 +24,8 @@
 #include <vector>
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
+#include "FastDACeeprom.h"
+
 
 #define OPTICAL //Comment this if still using old USB version
 #define SENDACK //Comment this to stop sending ACKs for every command
@@ -446,6 +448,10 @@ void router(InCommand *incommand)
   else if(strcmp("SET_PID_SLEW", cmd) == 0)
   {  
     set_pid_slew(incommand);   
+  }
+  else if(strcmp("EEPROM_TEST", cmd) == 0)
+  {  
+    eeprom_test(incommand);
   }
   else
   {
@@ -2617,4 +2623,10 @@ void awgint()//interrupt for AWG ramp
       }      
 #endif     
    }
+}
+
+
+void eeprom_test(InCommand * incommand)
+{
+  eepromtest();
 }

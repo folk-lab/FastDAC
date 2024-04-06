@@ -1,3 +1,6 @@
+#ifndef FASTDACDEFS_H
+#define FASTDACDEFS_H
+
 //AD7734 Register addresses
 #define ADC_IO 0x01
 #define ADC_REV 0x02
@@ -83,3 +86,5 @@ extern "C" char* sbrk(int incr);
 #else  // __ARM__
 extern char *__brkval;
 #endif  // __arm__
+
+#endif
