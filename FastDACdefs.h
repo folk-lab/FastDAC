@@ -1,6 +1,15 @@
 #ifndef FASTDACDEFS_H
 #define FASTDACDEFS_H
 
+#define OPTICAL //Comment this if still using old USB version
+
+#ifdef OPTICAL
+#define SERIALPORT Serial1
+#else
+#define SERIALPORT SerialUSB
+#endif
+
+
 //AD7734 Register addresses
 #define ADC_IO 0x01
 #define ADC_REV 0x02

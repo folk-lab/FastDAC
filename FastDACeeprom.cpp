@@ -2,5 +2,5 @@
 
 void eepromtest(void)
 {
-    Serial1.println("HELP!");
+    SERIALPORT.println("HELP!");
 }

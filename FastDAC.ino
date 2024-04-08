@@ -26,8 +26,6 @@
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 #include "FastDACeeprom.h"
 
-
-#define OPTICAL //Comment this if still using old USB version
 #define SENDACK //Comment this to stop sending ACKs for every command
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
@@ -45,12 +43,6 @@
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
-
-#ifdef OPTICAL
-#define SERIALPORT Serial1
-#else
-#define SERIALPORT SerialUSB
-#endif
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART, try to stay as integer divisor of 84MHz mclk
 
@@ -1245,7 +1237,7 @@ void cal_adc_with_dac(InCommand *incommand)
     
   }
   SERIALPORT.println();
-  SERIALPORT.println("CALIBRATION_FINISHED");
+  //SERIALPORT.println("CALIBRATION_FINISHED");
 }
 
 void adc_zero_sc_cal(InCommand *incommand)
@@ -1298,7 +1290,7 @@ void adc_ch_zero_sc_cal(InCommand *incommand)
   SERIALPORT.print(ch);
   SERIALPORT.print(",");
   SERIALPORT.println(calvalue);
-  SERIALPORT.println("CALIBRATION_FINISHED");
+  //SERIALPORT.println("CALIBRATION_FINISHED");
 }
 
 uint32_t cal_adc_ch_zero_scale(int ch)
@@ -1357,7 +1349,7 @@ void adc_ch_full_sc_cal(InCommand *incommand)
   SERIALPORT.print(ch);
   SERIALPORT.print(",");
   SERIALPORT.println(calvalue);
-  SERIALPORT.println("CALIBRATION_FINISHED");
+  //SERIALPORT.println("CALIBRATION_FINISHED");
 }
 
 uint32_t cal_adc_ch_full_scale(uint8_t ch)
@@ -1413,7 +1405,7 @@ void read_adc_cal(InCommand *incommand)
   SERIALPORT.print(ch);
   SERIALPORT.print(",");
   SERIALPORT.println(readADCfullcal(ch));
-  SERIALPORT.println("READ_FINISHED");
+  //SERIALPORT.println("READ_FINISHED");
 }
 
 void write_adc_cal(InCommand *incommand)
@@ -1510,7 +1502,7 @@ void dac_offset_adj(InCommand *incommand)
   }
   send_ack();
   calDACoffset(ch, offset);
-  SERIALPORT.println("CALIBRATION_FINISHED");
+  //SERIALPORT.println("CALIBRATION_FINISHED");
 }
 
 void calDACoffset(byte ch, float offset)
@@ -1557,7 +1549,7 @@ void dac_gain_adj(InCommand *incommand)
   }
   send_ack();
   calDACgain(ch, offset);
-  SERIALPORT.println("CALIBRATION_FINISHED");
+  //SERIALPORT.println("CALIBRATION_FINISHED");
 }
 
 void calDACgain(byte ch, float offset)

@@ -15,7 +15,7 @@ When the FastDAQ does not recognize the operation, it return the string `NOP`, w
 
 If the operation is recognized but some parameters are incorrect, it will return `SYNTAX_ERROR` or `RANGE_ERROR`
 
-If the operation is recognized and all parameters are correct, it will return `ACK` followed by the expected response.
+If the operation is recognized and all parameters are correct, it will return `ACK\r\n` followed by the expected response which is ended by `\r\n`.
 
 A note about calibrations; The FastDAQ is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, `FastDAQcalconstants_unitx.h` from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
 
@@ -154,8 +154,7 @@ Example:
 `ADC_CH_ZERO_SC_CAL,1`
 
 Returns:  
-`ch{adc channel},{zeroscale}`  
-`CALIBRATION_FINISHED`
+`ch{adc channel},{zeroscale}`
 
 ## ADC_CH_FULL_SC_CAL
 
@@ -168,8 +167,7 @@ Example:
 `ADC_CH_ZERO_SC_CAL,1`
 
 Returns:  
-`ch{adc channel},{fullscale}`  
-`CALIBRATION_FINISHED`
+`ch{adc channel},{fullscale}`
 
 ## CAL_ADC_WITH_DAC
 
@@ -182,8 +180,7 @@ Example:
 `CAL_ADC_WITH_DAC`
 
 Returns:  
-`ch0,{zeroScale ch0},ch1,{zeroScale ch1},ch2,{zeroScale ch2},ch3,{zeroScale ch3},ch0,{fullScale ch0},ch1,{fullScale ch1},ch2,{fullScale ch2},ch3,{fullScale ch3}`  
-`CALIBRATION_FINISHED`
+`ch0,{zeroScale ch0},ch1,{zeroScale ch1},ch2,{zeroScale ch2},ch3,{zeroScale ch3},ch0,{fullScale ch0},ch1,{fullScale ch1},ch2,{fullScale ch2},ch3,{fullScale ch3}`
 
 ## WRITE_ADC_CAL
 
@@ -196,7 +193,7 @@ Example:
 `WRITE_ADC_CAL,1,826,2100756`
 
 Returns:  
-`CALIBRATION_CHANGED`
+`CALIBRATION_CHANGED`  
 
 ## READ_ADC_CAL
 
@@ -210,7 +207,6 @@ Example:
 
 Returns:  
 `ch{adc channel},{zeroscale},ch{adc channel},{fullscale}`  
-`READ_FINISHED`
 
 ## DAC_OFFSET_ADJ
 
@@ -224,7 +220,6 @@ Example (with a DMM reading of -0.000070):
 
 Returns:  
 `ch{dac channel},{offset stepsize},{offset register}`  
-`CALIBRATION_FINISHED`
 
 ## DAC_GAIN_ADJ
 
@@ -238,7 +233,6 @@ Example (with DMM reading of -9.9969V):
 
 Returns:  
 `ch{dac channel},{gain stepsize},{gain register}`  
-`CALIBRATION_FINISHED`
 
 ## DAC_RESET_CAL
 
