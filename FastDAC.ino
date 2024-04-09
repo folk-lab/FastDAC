@@ -761,9 +761,9 @@ void int_ramp(InCommand *incommand)
   digitalWrite(data,HIGH);
 
   attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);
-
+  send_ack();//send ack just after interrupt attached
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  send_ack();  
+  
   while(!g_done)
   {
     if(query_serial(incommand))
@@ -854,9 +854,9 @@ void spec_ana(InCommand * incommand)
   digitalWrite(data,HIGH);
 
   attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);
+  send_ack();//send ack just after interrupt attached
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-
-  send_ack();  
+  
   while(!g_done)
   {
     if(query_serial(incommand))
@@ -2481,11 +2481,12 @@ void awg_ramp(InCommand *incommand)
 
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
-  send_ack();  
   delayMicroseconds(1000); // wait for DACs to settle
   digitalWrite(data,HIGH);
 
   attachInterrupt(digitalPinToInterrupt(drdy), awgint, FALLING);
+
+  send_ack();//send ack just after interrupt attached  
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
 
