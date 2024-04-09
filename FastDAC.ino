@@ -213,6 +213,11 @@ void setup()
   {
     g_DACsetpoint[i] = 0;
   }
+
+  if(initeeprom() != 0)
+  {
+    SERIALPORT.println("ERROR Initializing EEPROM!");
+  }
 }
 
 ////////////////
@@ -444,6 +449,10 @@ void router(InCommand *incommand)
   else if(strcmp("EEPROM_TEST", cmd) == 0)
   {  
     eeprom_test(incommand);
+  }
+  else if(strcmp("WRITE_ID_EEPROM", cmd) == 0)
+  {  
+    write_id_eeprom(incommand);
   }
   else
   {
@@ -1677,10 +1686,13 @@ void range_error(void)
 void idn()
 // return IDN string
 {
+  char idstring[EEPROM_ID_LEN];
   send_ack();
+  readeepromid(idstring);
   SERIALPORT.print(IDSTRING);
-  SERIALPORT.print("_UNIT");
-  SERIALPORT.print(UNITNUM);
+  SERIALPORT.print("_UNIT-");
+  SERIALPORT.print(idstring);
+  //SERIALPORT.print(UNITNUM);
   SERIALPORT.print("_");
   SERIALPORT.println(FW_VER);  
 }
@@ -2621,4 +2633,27 @@ void awgint()//interrupt for AWG ramp
 void eeprom_test(InCommand * incommand)
 {
   eepromtest();
+}
+
+void write_id_eeprom(InCommand * incommand)
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  if(strlen(incommand->token[1]) >= EEPROM_ID_LEN)
+  {
+    range_error();
+    return;
+  }
+  if(writeeepromid(incommand->token[1]) == 0)
+  {
+    send_ack();
+    SERIALPORT.println("ID_SAVED");
+  }
+  else
+  {
+    SERIALPORT.println("EEPROM_ERROR");
+  }
 }

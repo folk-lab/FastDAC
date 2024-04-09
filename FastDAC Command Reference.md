@@ -1,6 +1,6 @@
-# FASTDAQ REFERENCE MANUAL
+# FASTDAC REFERENCE MANUAL
 
-Every command sent to the FastDAQ should be a string (ASCII characters). Every string should start with the operation to execute and end with the character that determines the end of the string, in this case `\r` (carriage return), `\n` (newline), or a combination of both.
+Every command sent to the FastDAC should be a string (ASCII characters). Every string should start with the operation to execute and end with the character that determines the end of the string, in this case `\r` (carriage return), `\n` (newline), or a combination of both.
 
 General Syntax:
 `{operation},{data (varies with the operation)}\r(carriage return)`
@@ -9,27 +9,28 @@ Where items enclosed in braces `{}` must be substituted for values.
 
 Where a DAC or ADC channel is specified, they are zero-indexed; An 8-channel DAC is addressed as channels 0-7, and a 4-channel ADC is addressed as channels 0-3.
 
-The DAC-ADC AD5764-AD7734 (FastDAQ) can execute the following operations: `*IDN?`, `*RDY?`, `GET_ADC`, `RAMP_SMART`, `INT_RAMP`, `SPEC_ANA`, `CONVERT_TIME`, `READ_CONVERT_TIME`, `GET_DAC`, `ADC_CH_ZERO_SC_CAL`, `ADC_CH_FULL_SC_CAL`, `CAL_ADC_WITH_DAC`, `WRITE_ADC_CAL`, `READ_ADC_CAL`, `DAC_OFFSET_ADJ`, `DAC_GAIN_ADJ`, `DAC_RESET_CAL`, `FULL_SCALE`, `SET_MODE`, `ARM_SYNC`, `CHECK_SYNC`, `ADD_WAVE`, `CLR_WAVE`, `CHECK_WAVE`, `AWG_RAMP`, `START_PID`, `STOP_PID`, `SET_PID_TUNE`, `SET_PID_SETP`, `SET_PID_LIMS`, `SET_PID_DIR`, `SET_PID_SLEW`
+The FastDAC can execute the following operations: `*IDN?`, `*RDY?`, `GET_ADC`, `RAMP_SMART`, `INT_RAMP`, `SPEC_ANA`, `CONVERT_TIME`, `READ_CONVERT_TIME`, `GET_DAC`, `ADC_CH_ZERO_SC_CAL`, `ADC_CH_FULL_SC_CAL`, `CAL_ADC_WITH_DAC`, `WRITE_ADC_CAL`, `READ_ADC_CAL`, `DAC_OFFSET_ADJ`, `DAC_GAIN_ADJ`, `DAC_RESET_CAL`, `FULL_SCALE`, `SET_MODE`, `ARM_SYNC`, `CHECK_SYNC`, `ADD_WAVE`, `CLR_WAVE`, `CHECK_WAVE`, `AWG_RAMP`, `START_PID`, `STOP_PID`, `SET_PID_TUNE`, `SET_PID_SETP`, `SET_PID_LIMS`, `SET_PID_DIR`, `SET_PID_SLEW`
 
-When the FastDAQ does not recognize the operation, it return the string `NOP`, which stands for "No Operation"
+When the FastDAC does not recognize the operation, it return the string `NOP`, which stands for "No Operation"
 
 If the operation is recognized but some parameters are incorrect, it will return `SYNTAX_ERROR` or `RANGE_ERROR`
 
 If the operation is recognized and all parameters are correct, it will return `ACK\r\n` followed by the expected response which is ended by `\r\n`.
 
-A note about calibrations; The FastDAQ is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, `FastDAQcalconstants_unitx.h` from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
+**to be rewritten**
+A note about calibrations; The FastDAC is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, `FastDACx.h` from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
 
 The ADC channels are pre-calibrated for the default conversion time of 394µs, and the calibration can change with different conversion times, especially for conversion times faster than ~300µs. It is recommended to run the calibration routines, and record the calibration values, for the various conversion times that are intended to be used.
 
 ## `*IDN?` and `*RDY?`
 
-`*IDN?` returns the string `DAC-ADC_AD5764-AD7734_UNIT{serialnumber}_{firmware branch}`
+`*IDN?` returns the string `FASTDAC_UNIT-{unit id}_{firmware version}`
 
 Example:  
 `*IDN?`
 
 Returns:  
-`DAC-ADC_AD5764-AD7734_UNIT2_SERVICE`
+`FASTDAC_UNIT-FOLK2_SERVICE`
 
 `*RDY?` returns the string `READY` when the DAC-ADC is ready for a new operation.
 
@@ -331,7 +332,7 @@ Returns:
 
 # AWG FUNCTIONS
 
-The FastDAQ has an arbitrary waveform mode where a sequence of DAC setpoints can be assigned to 2 separate wave arrays. Up to 100 setpoints can be configured for each wave, and the number of ADC samples to take at each setpoint is specified. When an `AWG_RAMP` sequence is started, the AWG DAC channels assigned to each wave loop through the sequence a specified number of times, then the ramp DAC channels will take a step. The AWG waveforms will repeat until the ramp DAC channels finish their ramp.
+The FastDAC has an arbitrary waveform mode where a sequence of DAC setpoints can be assigned to 2 separate wave arrays. Up to 100 setpoints can be configured for each wave, and the number of ADC samples to take at each setpoint is specified. When an `AWG_RAMP` sequence is started, the AWG DAC channels assigned to each wave loop through the sequence a specified number of times, then the ramp DAC channels will take a step. The AWG waveforms will repeat until the ramp DAC channels finish their ramp.
 
 ## ADD_WAVE
 
@@ -389,7 +390,7 @@ Returns:
 
 # PID FUNCTIONS
 
-Somewhat experimental, the FastDAQ can act as a PID controller, currently only ADC 0 acts as the input, and DAC 0 acts as the output. While in PID mode, no other commands which use the ADC should be issued (`INT_RAMP`, `SPEC_ANA`, `AWG_RAMP`, `GET_ADC`), but DAC ramping channels other than DAC 0 via `RAMP_SMART` should be OK. While in PID mode, the loops runs continuously at the selected ADC 0 conversion time, and every 10th sample from ADC 0 and the output setting of DAC 0 will be returned as little-endian 4-byte floats followed by framing sequence `0xA5 0x5A`. This formatting and framing sequence was chosen for easy testing and live tuning with RealTerm 3.0.1.44 and could be changed. The PID routines are based on this library with some modifications:
+Somewhat experimental, the FastDAC can act as a PID controller, currently only ADC 0 acts as the input, and DAC 0 acts as the output. While in PID mode, no other commands which use the ADC should be issued (`INT_RAMP`, `SPEC_ANA`, `AWG_RAMP`, `GET_ADC`), but DAC ramping channels other than DAC 0 via `RAMP_SMART` should be OK. While in PID mode, the loops runs continuously at the selected ADC 0 conversion time, and every 10th sample from ADC 0 and the output setting of DAC 0 will be returned as little-endian 4-byte floats followed by framing sequence `0xA5 0x5A`. This formatting and framing sequence was chosen for easy testing and live tuning with RealTerm 3.0.1.44 and could be changed. The PID routines are based on this library with some modifications:
 
 https://github.com/br3ttb/Arduino-PID-Library
 

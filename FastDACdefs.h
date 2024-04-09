@@ -9,6 +9,10 @@
 #define SERIALPORT SerialUSB
 #endif
 
+#define FW_VER "SERVICE_EEPROM_TEST"
+
+#define IDSTRING "FASTDAC"
+
 
 //AD7734 Register addresses
 #define ADC_IO 0x01

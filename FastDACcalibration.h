@@ -1,8 +1,4 @@
-#define UNITNUM "2"
 
-#define FW_VER "SERVICE_EEPROM_TEST"
-
-#define IDSTRING "DAC-ADC_AD7734-AD5764"
 
 #define MAXNUMCALS 8
 
