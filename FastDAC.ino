@@ -2642,6 +2642,11 @@ void write_id_eeprom(InCommand * incommand)
     syntax_error();
     return;
   }
+  if(digitalRead(EEPROM_WP_PIN) == HIGH)
+  {
+    SERIALPORT.println("EEPROM_WRITE_PROTECTED");
+    return;
+  }
   if(strlen(incommand->token[1]) >= EEPROM_ID_LEN)
   {
     range_error();

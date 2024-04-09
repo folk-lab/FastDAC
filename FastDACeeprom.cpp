@@ -28,6 +28,7 @@ uint8_t initeeprom(void)
     //SERIALPORT.println("No EEPROM detected!");
     return -1;
   }
+  pinMode(EEPROM_WP_PIN, INPUT_PULLUP);
   //SERIALPORT.println("Memory detected!");
 
   //SERIALPORT.print("Mem size in bytes: ");

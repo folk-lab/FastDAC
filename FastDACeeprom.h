@@ -9,6 +9,8 @@
 #define EEPROM_I2C_CLOCK 400000L //400kHz i2c clock
 #define EEPROM_SIZE 256 //Size of EEPROM in kbits 256kbits = 32768 bytes
 
+#define EEPROM_WP_PIN 13 //Pin 13 has to be jumpered to GND to allow writing ID or factory cals
+
 #define EEPROM_ID_ADDR 0
 
 #define EEPROM_ID_LEN 128
