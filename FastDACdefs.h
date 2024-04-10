@@ -1,5 +1,5 @@
-#ifndef FASTDACDEFS_H
-#define FASTDACDEFS_H
+//#ifndef FASTDACDEFS_H
+//#define FASTDACDEFS_H
 
 #define OPTICAL //Comment this if still using old USB version
 
@@ -9,9 +9,13 @@
 #define SERIALPORT SerialUSB
 #endif
 
-#define FW_VER "SERVICE_EEPROM_TEST"
+#define FW_VER "SERVICE-EEPROM-TEST"
 
 #define IDSTRING "FASTDAC"
+
+#define NUMDACCHANNELS 8
+#define NUMADCCHANNELS 4
+
 
 
 //AD7734 Register addresses
@@ -100,4 +104,4 @@ extern "C" char* sbrk(int incr);
 extern char *__brkval;
 #endif  // __arm__
 
-#endif
+//#endif

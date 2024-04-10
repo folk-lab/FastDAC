@@ -15,8 +15,6 @@
 //// SETUP ////
 ///////////////
 
-#define NUMDACCHANNELS 8
-#define NUMADCCHANNELS 4
 
 #include "SPI.h" // necessary library for SPI communication
 
@@ -758,10 +756,18 @@ void int_ramp(InCommand *incommand)
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
 
   delayMicroseconds(1000); // wait for DACs to settle
+  
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
   digitalWrite(data,HIGH);
 
+  send_ack();//send ack and immediately attach interrupt
+  
   attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);
-  send_ack();//send ack just after interrupt attached
+
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
   while(!g_done)
@@ -851,10 +857,18 @@ void spec_ana(InCommand * incommand)
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and wait for sync, P1 as input
 
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
+  
   digitalWrite(data,HIGH);
+  
+  send_ack();//send ack and immediately attach interrupt
 
-  attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);
-  send_ack();//send ack just after interrupt attached
+  attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);  
+
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
   while(!g_done)
@@ -1180,22 +1194,26 @@ void default_cal(InCommand *incommand)
     return;
   }
   send_ack();
-  loaddefaultcals(); // set default calibration
+  //loaddefaultcals(); // set default calibration
+  loaddaccals(); // set default calibration
   SERIALPORT.println("CALIBRATION_CHANGED");
 }
 
-void loaddefaultcals()
+void loaddaccals()
 {
-  byte ch = 0;
+  uint8_t ch = 0;
+  /*
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    writeADCchzeroscale(ch, defaultADCzeroscale[ch]);
-    writeADCchfullscale(ch, defaultADCfullscale[ch]);
+    writeADCchzeroscale(ch, adczeroscalecal[ch]);
+    writeADCchfullscale(ch, adcfullscalecal[ch]);
   }
+  */
   for(ch = 0; ch < NUMDACCHANNELS; ch++)
   {
-    writeDACoffset(ch, defaultDACoffset[ch]);
-    writeDACgain(ch, defaultDACgain[ch]);
+    
+    writeDACoffset(ch, dacocal[ch]);
+    writeDACgain(ch, dacgcal[ch]);
   }
 }
 
@@ -2134,14 +2152,14 @@ uint8_t sync_check(uint8_t mask) //Checks for valid clock and sync signal, retur
 {
   uint8_t syncstatus = 0;
 #ifdef OPTICAL //only check clock and sync with optical version
-  if(!g_clock_synced && (mask & 0x1))
+  if(!g_clock_synced && (mask & CHECK_CLOCK))
   {
     syncstatus |= 1;
     SERIALPORT.println("CLOCK_NOT_READY");
   }
   if(g_ms_select != INDEP)
   {
-    if((digitalRead(adc_trig_in) == true) && (mask & 0x2))
+    if((digitalRead(adc_trig_in) == true) && (mask & CHECK_SYNC))
     {
       syncstatus |= 2;
       SERIALPORT.println("SYNC_NOT_READY");
@@ -2482,11 +2500,17 @@ void awg_ramp(InCommand *incommand)
   SPI.transfer(adc, ADC_IO); //Write to ADC IO register
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
   delayMicroseconds(1000); // wait for DACs to settle
+
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
   digitalWrite(data,HIGH);
+  
+  send_ack();//send ack and immediately attach interrupt  
 
   attachInterrupt(digitalPinToInterrupt(drdy), awgint, FALLING);
-
-  send_ack();//send ack just after interrupt attached  
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
 
@@ -2645,7 +2669,7 @@ void write_id_eeprom(InCommand * incommand)
   }
   if(digitalRead(EEPROM_WP_PIN) == HIGH)
   {
-    SERIALPORT.println("EEPROM_WRITE_PROTECTED");
+    SERIALPORT.println("WRITE_PROTECTED");
     return;
   }
   if(strlen(incommand->token[1]) >= EEPROM_ID_LEN)

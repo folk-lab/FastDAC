@@ -41,11 +41,13 @@ uint8_t writeeepromid(char * idstring)
 {
     
     uint32_t idlen = strlen(idstring);
+
+
     //SERIALPORT.print("ID string size: ");
     //SERIALPORT.println(idlen);
     if(idlen >= EEPROM_ID_LEN)
     {
-        return -1;
+        return 1;
     }
 
     uint8_t result;
@@ -58,4 +60,32 @@ uint8_t writeeepromid(char * idstring)
 void readeepromid(char * idstring)
 {
     extprom.read(EEPROM_ID_ADDR, (uint8_t *)idstring, EEPROM_ID_LEN);
+}
+
+uint8_t readeepromdaccal(uint8_t ch, uint8_t * offset, uint8_t * gain)
+{
+  //extprom.read
+  
+  return 0;
+}
+
+uint8_t writeeepromdaccal(uint8_t ch, uint8_t offset, uint8_t gain)
+{
+  
+  
+  return 0;
+}
+
+uint8_t readeepromadccal(uint8_t ch, uint8_t fw, uint32_t * zeroscale, uint32_t * fullscale)
+{
+
+  
+  return 0;
+}
+
+uint8_t writeeepromadccal(uint8_t ch, uint8_t fw, uint32_t zeroscale, uint32_t fullscale)
+{
+
+  
+  return 0;
 }

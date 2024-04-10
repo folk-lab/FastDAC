@@ -266,10 +266,12 @@ Returns:
 As of June 2020, new units have optical clock and sync inputs and outputs to allow synchronization between units. Functions that support sync are `SPEC_ANA`, `INT_RAMP`, and `AWG_RAMP`. Each unit must have the same number of ADC channels being sampled, and the conversion time must be the same. One unit must be set to MASTER, all others to SLAVE. Units can be daisy-chained with the MASTER unit's CLK_OUT and SYNC_OUT connected to the first SLAVE unit's CLK_IN and SYNC_IN, and so on for each additional slave. The general sequence would be:
 1. PC uses `SET_MODE` to select one unit as MASTER, and all others as SLAVE. It can take up to 20 seconds for the PLL to relock switching between MASTER and SLAVE if the clock frequency is substantially different, which can be checked with `CHECK_SYNC`
 2. PC sends `ARM_SYNC` to MASTER
-3. PC sends `INT_RAMP` (for example) to each SLAVE unit, which will wait for the SYNC signal from MASTER
+3. PC sends `INT_RAMP` (for example) to each SLAVE unit, which will `ACK` when ready, and wait for the SYNC signal from MASTER
 4. PC sends `INT_RAMP` to MASTER unit.
 5. PC waits for `RAMP_FINISHED` from each unit
 6. The process can be repeated from step 2 (`ARM_SYNC`)
+
+Note for step 3, the SLAVE unit will send an `ACK` when it is ready. If the ramp is called too quickly on the MASTER after the SLAVE (~2ms DAC settling time) the sync signal may be missed and `SYNC_NOT_READY` will be returned.
 
 ## SET_MODE
 
