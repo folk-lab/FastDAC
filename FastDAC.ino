@@ -204,18 +204,28 @@ void setup()
   SPI.setDataMode(adc,SPI_MODE3); //This should be 3 for the AD7734
   SPI.setDataMode(dac0,SPI_MODE1); //This should be 1 for the AD5764
   SPI.setDataMode(dac1,SPI_MODE1); //This should be 1 for the AD5764
-
+  
+	if(initeeprom() != 0)
+  {
+    SERIALPORT.println("ERROR Initializing EEPROM!");
+  }
   //loaddefaultcals(); //Only useful if per-unit cals are done, otherwise it's way off
-  //Initialize saved DAC setpoints to 0
+  
+	loaddaccals();
+	//Initialize saved DAC setpoints to 0
   for(int i = 0; i < NUMDACCHANNELS; i++)
   {
     g_DACsetpoint[i] = 0;
   }
 
-  if(initeeprom() != 0)
-  {
-    SERIALPORT.println("ERROR Initializing EEPROM!");
-  }
+  attachInterrupt(digitalPinToInterrupt(drdy), intset, FALLING);//Interrupt has to be attached once for the priority to stick
+  NVIC_SetPriority(PIOC_IRQn, 1); //Make ADC interrupt priority lower than UART
+  detachInterrupt(digitalPinToInterrupt(drdy));
+
+}
+void intset(void)
+{
+
 }
 
 ////////////////
@@ -452,11 +462,17 @@ void router(InCommand *incommand)
   {  
     write_id_eeprom(incommand);
   }
+	else if(strcmp("WRITE_DAC_CAL_EEPROM", cmd) == 0)
+  {  
+    write_dac_cal_eeprom(incommand);
+  }
   else
   {
     SERIALPORT.println("NOP");
-  } 
+  }
 
+	//SERIALPORT.print(F("Free RAM = ")); //F function does the same and is now a built in library, in IDE > 1.0.0
+  //SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
 }
 
 ///////////////////
@@ -764,9 +780,10 @@ void int_ramp(InCommand *incommand)
   }
   digitalWrite(data,HIGH);
 
+
   send_ack();//send ack and immediately attach interrupt
   
-  attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);
+  attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);  
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
@@ -774,7 +791,7 @@ void int_ramp(InCommand *incommand)
   {
     if(query_serial(incommand))
     {
-      if(strcmp("STOP", incommand->token[0]) == 0)
+      if(strcmp("STOP", incommand->token[0]) == 0)      
       {
         break;
       }     
@@ -902,14 +919,27 @@ void writetobuffer()
    if(!g_done)
    {
 #ifdef OPTICAL //no buffer required for regular UART (optical)
-     for(i = 0; i < g_numrampADCchannels; i++)
+     if(g_stepcount > 0) //Discard first sample to stay in sync with ramp commands
      {
-        SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
-        SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
-        SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte
+       for(i = 0; i < g_numrampADCchannels; i++)
+       {
+          SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+          SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
+          SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte           
+       }
      }
+     else
+     {
+       for(i = 0; i < g_numrampADCchannels; i++) //discard first loop
+       {
+          SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+          SPI.transfer(adc, 0, SPI_CONTINUE); // Read/write first byte
+          SPI.transfer(adc, 0); // Read/write second byte
+       }
+     }
+
      g_stepcount++;
-     if(g_stepcount >= g_numsteps)
+     if(g_stepcount > g_numsteps)
      {
         g_done = true;
      }
@@ -920,6 +950,11 @@ void writetobuffer()
          g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
          g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
          g_buffindex += 2;
+      }
+
+      if(g_stepcount < 1)//first loop has to be discarded, so just overwrite buffer
+      {
+        g_buffindex = 0;
       }
       g_stepcount++;
 
@@ -983,7 +1018,7 @@ void start_pid(InCommand *incommand)
   SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
 
   attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
-  NVIC_SetPriority(PIOC_IRQn, 1);
+
   
 }
 //PID Interrupts every ADC sample
@@ -1211,9 +1246,10 @@ void loaddaccals()
   */
   for(ch = 0; ch < NUMDACCHANNELS; ch++)
   {
-    
-    writeDACoffset(ch, dacocal[ch]);
-    writeDACgain(ch, dacgcal[ch]);
+    int8_t offset, gain;
+		readeepromdaccal(ch, &offset, &gain, false);
+    writeDACoffset(ch, offset);
+    writeDACgain(ch, gain);
   }
 }
 
@@ -1640,8 +1676,9 @@ void writeDACoffset(int ch, int8_t steps)
   int thisdac;
   int thisldac;
 
+	dacocal[ch] = steps;
   convertDACch(&ch, &thisdac, &thisldac);
-
+	//SERIALPORT.println(steps);
   SPI.transfer(thisdac, DAC_OFFSET | ch,SPI_CONTINUE); // Write DAC channel offset register
   SPI.transfer(thisdac, 0x00,SPI_CONTINUE);   // writes first byte
   SPI.transfer(thisdac, steps);
@@ -1654,6 +1691,7 @@ void writeDACgain(int ch, int8_t steps)
   int thisdac;
   int thisldac;
 
+	dacgcal[ch] = steps;
   convertDACch(&ch, &thisdac, &thisldac);
 
   SPI.transfer(thisdac, DAC_FINEGAIN  | ch,SPI_CONTINUE); // Write DAC channel fine gain register
@@ -2654,6 +2692,9 @@ void awgint()//interrupt for AWG ramp
    }
 }
 
+/////////////////
+//   EEPROM    //
+/////////////////
 
 void eeprom_test(InCommand * incommand)
 {
@@ -2686,4 +2727,38 @@ void write_id_eeprom(InCommand * incommand)
   {
     SERIALPORT.println("EEPROM_ERROR");
   }
+}
+
+void write_dac_cal_eeprom(InCommand * incommand)
+{
+  if((incommand->paramcount != 2) && (incommand->paramcount != 3))
+  {
+    syntax_error();
+    return;
+  }
+	uint8_t ch = atoi(incommand->token[1]);
+	if(ch >= NUMDACCHANNELS)
+	{
+		range_error();
+		return;
+	}
+
+	if(incommand->paramcount == 2)
+	{
+		writeeepromdaccal(ch, dacocal[ch], dacgcal[ch], false);
+	}
+	else if(strcmp(incommand->token[2], "FACTORY") == 0)
+	{
+		if(digitalRead(EEPROM_WP_PIN) == HIGH)
+  	{
+    	SERIALPORT.println("WRITE_PROTECTED");
+    	return;
+  	}
+		send_ack();
+		writeeepromdaccal(ch, dacocal[ch], dacgcal[ch], true);
+	}
+
+	send_ack();
+	
+	SERIALPORT.println("CAL_SAVED");
 }
