@@ -35,9 +35,9 @@
 #define COMMANDBUFFERSIZE 1024 //Buffer for incoming command
 #define MAXPARAMS 50 //maximum number of parameters to be parsed in a single command
 
-#define DACSETTLETIME  1//milliseconds to wait before starting ramp
+#define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
-#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
+//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
@@ -735,7 +735,7 @@ void int_ramp(InCommand *incommand)
 
   g_configurerampADCchannels();
 
-  delayMicroseconds(1000); // wait for DACs to settle
+  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
   
   //Check for SYNC again
   if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
@@ -1282,7 +1282,7 @@ void cal_adc_with_dac(InCommand *incommand)
   {
     writeDAC(ch, 0.0, true); // mV
   }
-  delayMicroseconds(2000); // wait 2 ms
+  delayMicroseconds(3000); // wait 3 ms
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     SERIALPORT.print("ch");
@@ -1296,7 +1296,7 @@ void cal_adc_with_dac(InCommand *incommand)
   {
     writeDAC(ch, 10000.0, true); // mV
   }
-  delayMicroseconds(2000); // wait 2ms
+  delayMicroseconds(3000); // wait 3ms
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     SERIALPORT.print("ch");
@@ -2453,10 +2453,9 @@ void awg_ramp(InCommand *incommand)
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
   ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
   ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-
   
   g_configurerampADCchannels();
-  delayMicroseconds(1000); // wait for DACs to settle
+  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
 
   //Check for SYNC again
   if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
