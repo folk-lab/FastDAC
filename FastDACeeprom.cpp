@@ -68,8 +68,17 @@ uint8_t readeepromdaccal(uint8_t ch, int8_t * offset, int8_t * gain, bool factor
   {
     return 1;
   }
-  *offset = extprom.read((ch * 2) + EEPROM_DAC_CAL_ADDR);
-  *gain = extprom.read((ch * 2) + EEPROM_DAC_CAL_ADDR + 1);  
+  if(factory)
+  {
+    *offset = extprom.read((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR);
+    *gain = extprom.read((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR + 1);  
+  }
+  else
+  {
+    *offset = extprom.read((ch * 2) + EEPROM_DAC_CAL_ADDR);
+    *gain = extprom.read((ch * 2) + EEPROM_DAC_CAL_ADDR + 1);  
+  }
+  
   return 0;
 }
 
@@ -81,12 +90,13 @@ uint8_t writeeepromdaccal(uint8_t ch, int8_t offset, int8_t gain, bool factory)
   }
   if(factory)
   {
-
+    extprom.write((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR, offset);
+    extprom.write((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR + 1, gain);  
   }
   else
   {
-  extprom.write((ch * 2) + EEPROM_DAC_CAL_ADDR, offset);
-  extprom.write((ch * 2) + EEPROM_DAC_CAL_ADDR + 1, gain);  
+    extprom.write((ch * 2) + EEPROM_DAC_CAL_ADDR, offset);
+    extprom.write((ch * 2) + EEPROM_DAC_CAL_ADDR + 1, gain);  
   }
   
   return 0;

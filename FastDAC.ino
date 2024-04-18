@@ -37,7 +37,7 @@
 
 #define DACSETTLETIME  1//milliseconds to wait before starting ramp
 
-//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
+#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
@@ -728,62 +728,26 @@ void int_ramp(InCommand *incommand)
   SERIALPORT.println(g_numsteps);
   #endif  
   //configure DAC channels
-  for(i = 0; i < g_numrampDACchannels; i++)
-  {
-
-    //g_DACramppoint[i] = g_DACstartpoint[i];
-    g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
-
-    g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31)) / g_numsteps;
-    DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set DACs to initial point
-
-    #ifdef DEBUGRAMP
-    SERIALPORT.print("DAC ch ");
-    SERIALPORT.print(g_DACchanselect[i]);
-    SERIALPORT.print(" Startpoint: ");
-    SERIALPORT.print(g_DACstartpoint[i]);
-    SERIALPORT.print(" Ramppoint: ");
-    SERIALPORT.print((int32_t)(g_DACramppoint[i] / BIT31));
-    SERIALPORT.print(", Finalpoint: ");
-    SERIALPORT.print(g_DACendpoint[i]);
-    SERIALPORT.print(", Stepsize: ");
-    SERIALPORT.println((int32_t)(g_DACstep[i] / BIT31));
-    #endif
-  }
+  g_configurerampDACchannels();
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
   ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
   ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
 
-  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
-  {
-    SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
-    SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
-    SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
-    SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
-
-    #ifdef DEBUGRAMP
-    SERIALPORT.print("ADC ch: ");
-    SERIALPORT.print(g_ADCchanselect[i]);
-    SERIALPORT.println(" selected");
-    #endif
-  }
-
-  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
+  g_configurerampADCchannels();
 
   delayMicroseconds(1000); // wait for DACs to settle
   
   //Check for SYNC again
   if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
   {
+    g_rampadcidle();
     return;
   }
   digitalWrite(data,HIGH);
 
-
   send_ack();//send ack and immediately attach interrupt
   
-  attachInterrupt(digitalPinToInterrupt(drdy), updatead, FALLING);  
+  attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
@@ -798,17 +762,88 @@ void int_ramp(InCommand *incommand)
     }
   }  
   detachInterrupt(digitalPinToInterrupt(drdy));
-  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
-  for(i = 0; i < NUMADCCHANNELS; i++)
-  {
-  SPI.transfer(adc, ADC_CHSETUP | i);//Access channel setup register
-  SPI.transfer(adc, ADC_CHSETUP_RNG10BI);//set +/-10V range and disable for continuous mode
-  SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
-  SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
-  }
+  
+  g_rampadcidle();
   digitalWrite(data,LOW);
   SERIALPORT.println("RAMP_FINISHED");
+}
+
+void int_ramp_int()
+{
+   int16_t i;
+   if(!g_done)
+   {
+      ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
+      ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+      
+#ifdef OPTICAL //no buffering with regular UART (optical)
+      if(g_stepcount > 0) //first sample comes in on second loop through the interrupt
+      {
+        for(i = 0; i < g_numrampADCchannels; i++)
+        {
+           SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+           SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
+           SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte           
+        }
+      }
+      else
+      {
+        for(i = 0; i < g_numrampADCchannels; i++) //discard first loop
+        {
+           SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+           SPI.transfer(adc, 0, SPI_CONTINUE); // Read/write first byte
+           SPI.transfer(adc, 0); // Read/write second byte
+        }
+      }
+#else      
+      for(i = 0; i < g_numrampADCchannels; i++)
+      {
+         SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
+         g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
+         g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
+         g_buffindex += 2;
+      }
+
+      if(g_stepcount < 1)//first loop has to be discarded, so just overwrite buffer
+      {
+        g_buffindex = 0;
+      }
+#endif
+      
+      g_stepcount++;
+
+#ifdef OPTICAL
+      if(g_stepcount > g_numsteps)
+      {        
+        g_done = true;
+      }
+#else      
+      if (g_buffindex >= USBBUFFSIZE)
+      {
+        SERIALPORT.write((char*)g_USBbuff, g_buffindex);
+        g_buffindex = 0;
+      }
+
+      if(g_stepcount > g_numsteps)
+      {
+        if(g_buffindex > 0)
+        {
+          SERIALPORT.write((char*)g_USBbuff, g_buffindex);
+          g_buffindex = 0;
+        }
+        g_done = true;
+      }
+#endif      
+      else
+      {
+        //get next DAC step ready if this isn't the last sample
+        for(i = 0; i < g_numrampDACchannels; i++)
+        {
+          g_DACramppoint[i] += g_DACstep[i];
+          DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));
+        }
+      }
+   }
 }
 
 ////////////////////////////
@@ -843,7 +878,6 @@ void spec_ana(InCommand * incommand)
     syntax_error();
     return;
   }
-
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
   //select ADC channels and check range
   for(i = 0; i < g_numrampADCchannels; i++)
@@ -855,28 +889,12 @@ void spec_ana(InCommand * incommand)
       return;
     }
   }
-  for(i = 0; i < g_numrampADCchannels; i++) // Configure ADC channels
-  {
-    /*
-    g_ADCchanselect[i] = incommand->token[1][i] - '0';
-    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
-    {
-      range_error();
-      return;
-    }
-    */
-    SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
-    SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
-    SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
-    SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
-  }
-
-  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and wait for sync, P1 as input
+  g_configurerampADCchannels();
 
   //Check for SYNC again
   if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
   {
+    g_rampadcidle();
     return;
   }
   
@@ -884,7 +902,7 @@ void spec_ana(InCommand * incommand)
   
   send_ack();//send ack and immediately attach interrupt
 
-  attachInterrupt(digitalPinToInterrupt(drdy), writetobuffer, FALLING);  
+  attachInterrupt(digitalPinToInterrupt(drdy), spec_ana_int, FALLING);  
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
@@ -900,20 +918,12 @@ void spec_ana(InCommand * incommand)
   }  
 
   detachInterrupt(digitalPinToInterrupt(drdy));
-  SPI.transfer(adc, ADC_IO); // Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); // Change RDY to trigger when any channel complete
-  for(i = 0; i < NUMADCCHANNELS; i++)
-  {
-  SPI.transfer(adc, ADC_CHSETUP | i); // Access channel setup register
-  SPI.transfer(adc, ADC_CHSETUP_RNG10BI); // set +/-10V range and disable for continuous mode
-  SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]); // Access channel mode register
-  SPI.transfer(adc, ADC_MODE_IDLE); // Set ADC to idle
-  }
+  g_rampadcidle();
   digitalWrite(data,LOW);
   SERIALPORT.println("READ_FINISHED");
 }
 
-void writetobuffer()
+void spec_ana_int()
 {
    int16_t i;
    if(!g_done)
@@ -1890,83 +1900,7 @@ void resetADC()
 
 //// DAC UTIL ////
 
-void updatead()
-{
-   int16_t i;
-   if(!g_done)
-   {
-      ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
-      ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-      
-#ifdef OPTICAL //no buffering with regular UART (optical)
-      if(g_stepcount > 0) //first sample comes in on second loop through the interrupt
-      {
-        for(i = 0; i < g_numrampADCchannels; i++)
-        {
-           SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
-           SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
-           SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte           
-        }
-      }
-      else
-      {
-        for(i = 0; i < g_numrampADCchannels; i++) //discard first loop
-        {
-           SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
-           SPI.transfer(adc, 0, SPI_CONTINUE); // Read/write first byte
-           SPI.transfer(adc, 0); // Read/write second byte
-        }
-      }
-#else      
-      for(i = 0; i < g_numrampADCchannels; i++)
-      {
-         SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
-         g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
-         g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
-         g_buffindex += 2;
-      }
 
-      if(g_stepcount < 1)//first loop has to be discarded, so just overwrite buffer
-      {
-        g_buffindex = 0;
-      }
-#endif
-      
-      g_stepcount++;
-
-#ifdef OPTICAL
-      if(g_stepcount > g_numsteps)
-      {        
-        g_done = true;
-      }
-#else      
-      if (g_buffindex >= USBBUFFSIZE)
-      {
-        SERIALPORT.write((char*)g_USBbuff, g_buffindex);
-        g_buffindex = 0;
-      }
-
-      if(g_stepcount > g_numsteps)
-      {
-        if(g_buffindex > 0)
-        {
-          SERIALPORT.write((char*)g_USBbuff, g_buffindex);
-          g_buffindex = 0;
-        }
-        g_done = true;
-      }
-#endif      
-      else
-      {
-        //get next DAC step ready if this isn't the last sample
-        for(i = 0; i < g_numrampDACchannels; i++)
-        {
-          g_DACramppoint[i] += g_DACstep[i];
-          DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));
-        }
-      }
-   }
-}
 
 void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period, InCommand *incommand)
 // voltage in mV
@@ -2520,35 +2454,21 @@ void awg_ramp(InCommand *incommand)
   ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
   ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
 
-  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
-  {
-    //g_ADCchanselect[i] = channelsADC[i] - '0';
-    SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[i]);//Access channel setup register
-    SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
-    SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
-    SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
-
-    #ifdef DEBUGRAMP
-    SERIALPORT.print("ADC ch: ");
-    SERIALPORT.print(g_ADCchanselect[i]);
-    SERIALPORT.println(" selected");
-    #endif
-  }
-
-  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
+  
+  g_configurerampADCchannels();
   delayMicroseconds(1000); // wait for DACs to settle
 
   //Check for SYNC again
   if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
   {
+    g_rampadcidle();
     return;
   }
   digitalWrite(data,HIGH);
   
   send_ack();//send ack and immediately attach interrupt  
 
-  attachInterrupt(digitalPinToInterrupt(drdy), awgint, FALLING);
+  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
 
@@ -2563,20 +2483,13 @@ void awg_ramp(InCommand *incommand)
     }
   }  
   detachInterrupt(digitalPinToInterrupt(drdy));
-  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
-  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
-  for(i = 0; i < NUMADCCHANNELS; i++)
-  {
-  SPI.transfer(adc, ADC_CHSETUP | i);//Access channel setup register
-  SPI.transfer(adc, ADC_CHSETUP_RNG10BI);//set +/-10V range and disable for continuous mode
-  SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]);   //Access channel mode register
-  SPI.transfer(adc, ADC_MODE_IDLE);  //Set ADC to idle
-  }
+  
+  g_rampadcidle();
   digitalWrite(data,LOW);
   SERIALPORT.println("RAMP_FINISHED");
 }
 
-void awgint()//interrupt for AWG ramp
+void awg_ramp_int()//interrupt for AWG ramp
 {
    uint32_t i, j;
    if(!g_done)
@@ -2692,6 +2605,71 @@ void awgint()//interrupt for AWG ramp
    }
 }
 
+void g_configurerampADCchannels(void)
+{
+  uint8_t i;
+  for(i = 1; i <= g_numrampADCchannels; i++) // Configure ADC channels, the first channel to sample gets configured last
+  {
+    SPI.transfer(adc, ADC_CHSETUP | g_ADCchanselect[g_numrampADCchannels - i]);//Access channel setup register
+    SPI.transfer(adc, ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
+    SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[g_numrampADCchannels - i]);   //Access channel mode register
+    SPI.transfer(adc, ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
+
+    
+
+    #ifdef DEBUGRAMP
+    SERIALPORT.print("ADC ch: ");
+    SERIALPORT.print(g_ADCchanselect[g_numrampADCchannels - i]);
+    SERIALPORT.println(" selected");
+    #endif
+  }
+  SPI.transfer(adc, ADC_IO); //Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and wait for sync, P1 as input
+
+}
+
+
+void g_configurerampDACchannels(void)
+{
+  uint8_t i;
+  for(i = 0; i < g_numrampDACchannels; i++)
+  {
+
+    //g_DACramppoint[i] = g_DACstartpoint[i];
+    g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
+
+    g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31)) / g_numsteps;
+    DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set DACs to initial point
+
+    #ifdef DEBUGRAMP
+    SERIALPORT.print("DAC ch ");
+    SERIALPORT.print(g_DACchanselect[i]);
+    SERIALPORT.print(" Startpoint: ");
+    SERIALPORT.print(g_DACstartpoint[i]);
+    SERIALPORT.print(" Ramppoint: ");
+    SERIALPORT.print((int32_t)(g_DACramppoint[i] / BIT31));
+    SERIALPORT.print(", Finalpoint: ");
+    SERIALPORT.print(g_DACendpoint[i]);
+    SERIALPORT.print(", Stepsize: ");
+    SERIALPORT.println((int32_t)(g_DACstep[i] / BIT31));
+    #endif
+  }
+}
+
+void g_rampadcidle(void)
+{
+  uint8_t i;
+  SPI.transfer(adc, ADC_IO); // Write to ADC IO register
+  SPI.transfer(adc, ADC_IO_DEFAULT | ADC_IO_P1DIR); // Change RDY to trigger when any channel complete
+  for(i = 0; i < NUMADCCHANNELS; i++)
+  {
+  SPI.transfer(adc, ADC_CHSETUP | i); // Access channel setup register
+  SPI.transfer(adc, ADC_CHSETUP_RNG10BI); // set +/-10V range and disable for continuous mode
+  SPI.transfer(adc, ADC_CHMODE | g_ADCchanselect[i]); // Access channel mode register
+  SPI.transfer(adc, ADC_MODE_IDLE); // Set ADC to idle
+  }
+
+}
 /////////////////
 //   EEPROM    //
 /////////////////
@@ -2735,30 +2713,35 @@ void write_dac_cal_eeprom(InCommand * incommand)
   {
     syntax_error();
     return;
-  }
+  }  
 	uint8_t ch = atoi(incommand->token[1]);
 	if(ch >= NUMDACCHANNELS)
 	{
 		range_error();
 		return;
 	}
+  bool factory = false;
 
-	if(incommand->paramcount == 2)
+	if(incommand->paramcount == 3)
 	{
-		writeeepromdaccal(ch, dacocal[ch], dacgcal[ch], false);
-	}
-	else if(strcmp(incommand->token[2], "FACTORY") == 0)
-	{
-		if(digitalRead(EEPROM_WP_PIN) == HIGH)
-  	{
-    	SERIALPORT.println("WRITE_PROTECTED");
-    	return;
-  	}
-		send_ack();
-		writeeepromdaccal(ch, dacocal[ch], dacgcal[ch], true);
+		if(strcmp(incommand->token[2], "FACTORY") == 0)
+    {
+      if(digitalRead(EEPROM_WP_PIN) == HIGH)
+  	  {
+    	  SERIALPORT.println("WRITE_PROTECTED");
+    	  return;
+  	  }
+      factory = true;
+    }
+    else
+    {
+    syntax_error();
+    return;
+    }
 	}
 
 	send_ack();
+	writeeepromdaccal(ch, dacocal[ch], dacgcal[ch], factory);
 	
 	SERIALPORT.println("CAL_SAVED");
 }
