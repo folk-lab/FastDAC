@@ -669,7 +669,7 @@ void int_ramp(InCommand *incommand)
     return;
   }
   
-  if(incommand->paramcount < 6)
+  if(incommand->paramcount < 4)
   {
     syntax_error();
     return;
@@ -681,6 +681,12 @@ void int_ramp(InCommand *incommand)
   char * channelsADC = incommand->token[2];
   g_numrampDACchannels = strlen(channelsDAC);  
   g_numrampADCchannels = strlen(channelsADC);
+  //check if no DACs selected
+  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
+  {
+    //SERIALPORT.println("NO DACS");
+    g_numrampDACchannels = 0;
+  }
 
   g_done = false;
   g_stepcount = 0;
@@ -690,25 +696,28 @@ void int_ramp(InCommand *incommand)
     syntax_error();
     return;
   }  
-  //define DAC channels and check range
-  for(i = 0; i < g_numrampDACchannels; i++)
+  //check if no DACs selected
+  if(g_numrampDACchannels != 0)
   {
-    //g_DACchanselect[i] = channelsDAC[i] - '0';
-    g_DACchanselect[i] = channelsDAC[i] - '0';
-    if(g_DACchanselect[i] >= NUMDACCHANNELS)
+    //define DAC channels and check range
+    for(i = 0; i < g_numrampDACchannels; i++)
     {
-      range_error();
-      return;
+      g_DACchanselect[i] = channelsDAC[i] - '0';
+      if(g_DACchanselect[i] >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
+      float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
+      if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
+      {
+        range_error();
+        return;
+      }
+      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+      g_DACendpoint[i] = voltageToInt32(dacendvoltage);
     }
-    float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
-    float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
-    if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
-    {
-      range_error();
-      return;
-    }
-    g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
-    g_DACendpoint[i] = voltageToInt32(dacendvoltage);
   }
   //define ADC channels and check range
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
@@ -2286,9 +2295,9 @@ void awg_ramp(InCommand *incommand)
     return;
   }
   //Do some initial bounds checking
-  if(incommand->paramcount < 9)
+  if(incommand->paramcount < 7)
   {
-    range_error();
+    syntax_error();
     return;
   }
   int i, j;
@@ -2349,6 +2358,13 @@ void awg_ramp(InCommand *incommand)
   char * channelsADC = incommand->token[g_numwaves + 3];
   g_numrampADCchannels = strlen(channelsADC);
 
+  //check if no DACs selected
+  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
+  {
+    //SERIALPORT.println("NO DACS");
+    g_numrampDACchannels = 0;
+  }
+
   g_done = false;
   g_firstsamples = true;
   
@@ -2376,26 +2392,30 @@ void awg_ramp(InCommand *incommand)
   SERIALPORT.print("Numsteps: ");  
   SERIALPORT.println(g_numsteps);
 #endif
-  //define DAC channels and check range  
-  for(i = 0; i < g_numrampDACchannels; i++)
+  //check if no DACs selected
+  if(g_numrampDACchannels != 0)
   {
-    g_DACchanselect[i] = channelsDAC[i] - '0';
-    if(g_DACchanselect[i] >= NUMDACCHANNELS)
+    //define DAC channels and check range  
+    for(i = 0; i < g_numrampDACchannels; i++)
     {
-      range_error();
-      return;
+      g_DACchanselect[i] = channelsDAC[i] - '0';
+      if(g_DACchanselect[i] >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      float dacstartvoltage = atof(incommand->token[i+4+g_numwaves])/1000.0;
+      float dacendvoltage = atof(incommand->token[i+4+g_numwaves+g_numrampDACchannels])/1000.0;
+      if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
+      {
+        range_error();
+        return;
+      }
+      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+      g_DACendpoint[i] = voltageToInt32(dacendvoltage);   
     }
-    float dacstartvoltage = atof(incommand->token[i+4+g_numwaves])/1000.0;
-    float dacendvoltage = atof(incommand->token[i+4+g_numwaves+g_numrampDACchannels])/1000.0;
-    if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
-    {
-      range_error();
-      return;
-    }
-    g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
-    g_DACendpoint[i] = voltageToInt32(dacendvoltage);   
   }
-  
+
   //define ADC channels and check range
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
   {  
