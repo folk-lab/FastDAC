@@ -30,8 +30,6 @@
 
 #define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
 
-#define USBBUFFSIZE 300// works up to 450, but at some value higher than that the behaviour is to wait and send >2000 byte packets. Don't know why. Not used with optical comms
-
 #define COMMANDBUFFERSIZE 1024 //Buffer for incoming command
 #define MAXPARAMS 50 //maximum number of parameters to be parsed in a single command
 
@@ -78,8 +76,6 @@ const int testpin = 11;
 float DAC_FULL_SCALE = 10.0;
 
 volatile int16_t g_DACsetpoint[NUMDACCHANNELS];//global array for current DAC setpoints, only written to in DACintegersend()
-
-volatile byte g_USBbuff[USBBUFFSIZE + 100]; //add some bytes to the buffer to prevent overflow in interrupt
 
 //Ramp interrupt global variables
 volatile uint32_t g_buffindex = 0;
@@ -793,7 +789,6 @@ void int_ramp_int()
       ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
       ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
       
-#ifdef OPTICAL //no buffering with regular UART (optical)
       if(g_stepcount > 0) //first sample comes in on second loop through the interrupt
       {
         for(i = 0; i < g_numrampADCchannels; i++)
@@ -811,46 +806,13 @@ void int_ramp_int()
            SPI.transfer(adc, 0, SPI_CONTINUE); // Read/write first byte
            SPI.transfer(adc, 0); // Read/write second byte
         }
-      }
-#else      
-      for(i = 0; i < g_numrampADCchannels; i++)
-      {
-         SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
-         g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
-         g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
-         g_buffindex += 2;
-      }
-
-      if(g_stepcount < 1)//first loop has to be discarded, so just overwrite buffer
-      {
-        g_buffindex = 0;
-      }
-#endif
-      
+      }      
       g_stepcount++;
 
-#ifdef OPTICAL
       if(g_stepcount > g_numsteps)
       {        
         g_done = true;
       }
-#else      
-      if (g_buffindex >= USBBUFFSIZE)
-      {
-        SERIALPORT.write((char*)g_USBbuff, g_buffindex);
-        g_buffindex = 0;
-      }
-
-      if(g_stepcount > g_numsteps)
-      {
-        if(g_buffindex > 0)
-        {
-          SERIALPORT.write((char*)g_USBbuff, g_buffindex);
-          g_buffindex = 0;
-        }
-        g_done = true;
-      }
-#endif      
       else
       {
         //get next DAC step ready if this isn't the last sample
@@ -945,7 +907,6 @@ void spec_ana_int()
    int16_t i;
    if(!g_done)
    {
-#ifdef OPTICAL //no buffer required for regular UART (optical)
      if(g_stepcount > 0) //Discard first sample to stay in sync with ramp commands
      {
        for(i = 0; i < g_numrampADCchannels; i++)
@@ -969,38 +930,7 @@ void spec_ana_int()
      if(g_stepcount > g_numsteps)
      {
         g_done = true;
-     }
-#else
-      for(i = 0; i < g_numrampADCchannels; i++)
-      {
-         SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); // Read channel data register
-         g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
-         g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
-         g_buffindex += 2;
-      }
-
-      if(g_stepcount < 1)//first loop has to be discarded, so just overwrite buffer
-      {
-        g_buffindex = 0;
-      }
-      g_stepcount++;
-
-      if (g_buffindex >= USBBUFFSIZE)
-      {
-        SERIALPORT.write((char*)g_USBbuff, g_buffindex);
-        g_buffindex = 0;
-      }
-
-      if(g_stepcount >= g_numsteps)
-      {
-        if(g_buffindex > 0)
-        {
-          SERIALPORT.write((char*)g_USBbuff, g_buffindex);
-          g_buffindex = 0;
-        }
-        g_done = true;
-      }
-#endif      
+     }  
    }
 }
 
@@ -2140,7 +2070,6 @@ void check_sync(InCommand *incommand)
 uint8_t sync_check(uint8_t mask) //Checks for valid clock and sync signal, returns 0 if ok, 1-3 if not: 1 (clock not ok) or'ed with 2 (sync_ok)
 {
   uint8_t syncstatus = 0;
-#ifdef OPTICAL //only check clock and sync with optical version
   if(!g_clock_synced && (mask & CHECK_CLOCK))
   {
     syncstatus |= 1;
@@ -2154,7 +2083,6 @@ uint8_t sync_check(uint8_t mask) //Checks for valid clock and sync signal, retur
       SERIALPORT.println("SYNC_NOT_READY");
     }
   }
-#endif 
   return syncstatus;
 }
 
@@ -2523,8 +2451,6 @@ void awg_ramp_int()//interrupt for AWG ramp
    {
       ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
       ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-      
-#ifdef OPTICAL //no buffering with regular UART (optical)
 
       if(g_firstsamples)
       {
@@ -2545,21 +2471,6 @@ void awg_ramp_int()//interrupt for AWG ramp
            SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte
         }
       }
-#else      
-      for(i = 0; i < g_numrampADCchannels; i++)
-      {
-         SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
-         g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
-         g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
-         g_buffindex += 2;
-      }
-
-      if(g_firstsamples)//first loop has to be discarded, so just overwrite buffer
-      {
-        g_buffindex = 0;
-        g_firstsamples = false;         
-      }
-#endif
 
       for(i = 0; i < g_numwaves; i++)
       {
@@ -2593,22 +2504,13 @@ void awg_ramp_int()//interrupt for AWG ramp
           {
             g_done = true;
             waitDRDY();
-#ifdef OPTICAL
             for(i = 0; i < g_numrampADCchannels; i++)
             {
               SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
               SERIALPORT.write(SPI.transfer(adc, 0, SPI_CONTINUE)); // Read/write first byte
               SERIALPORT.write(SPI.transfer(adc, 0)); // Read/write second byte
             }
-#else                        
-            for(i = 0; i < g_numrampADCchannels; i++)
-            {
-              SPI.transfer(adc, ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i], SPI_CONTINUE); //Read channel data register
-              g_USBbuff[g_buffindex] = SPI.transfer(adc, 0, SPI_CONTINUE); // Reads first byte
-              g_USBbuff[g_buffindex + 1] = SPI.transfer(adc, 0); // Reads second byte
-              g_buffindex += 2;
-            }
-#endif               
+            
             detachInterrupt(digitalPinToInterrupt(drdy));            
           }
           else
@@ -2622,13 +2524,6 @@ void awg_ramp_int()//interrupt for AWG ramp
           }                  
         }
       }
-#ifndef OPTICAL
-      if(g_buffindex >= USBBUFFSIZE || g_done)
-      {
-        SERIALPORT.write((char*)g_USBbuff, g_buffindex);
-        g_buffindex = 0;
-      }      
-#endif     
    }
 }
 
