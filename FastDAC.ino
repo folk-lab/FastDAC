@@ -19,7 +19,7 @@
 #include "SPI.h" // necessary library for SPI communication
 
 #include "src/PID/PID_v1.h" // Our own 'fork' of https://github.com/br3ttb/Arduino-PID-Library/
-#include <vector>
+//#include <vector>
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
 #include "FastDACeeprom.h"
@@ -43,6 +43,7 @@
 #define BIT47 0x100000000000
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART, try to stay as integer divisor of 84MHz mclk
+
 
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
@@ -71,6 +72,8 @@ const int drdy=48; // Data is ready pin on ADC
 const int led = 28;
 const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
 const int err=35;
+const int testpin = 11;
+
 
 float DAC_FULL_SCALE = 10.0;
 
@@ -180,7 +183,7 @@ void setup()
   pinMode(led, OUTPUT);  //Used for blinking indicator LED
   digitalWrite(led, HIGH);
   pinMode(data, OUTPUT);
-
+  pinMode(testpin , OUTPUT);
   digitalWrite(reset,HIGH); // Resets ADC on startup.
   digitalWrite(data,LOW);
   digitalWrite(reset,LOW);
@@ -241,8 +244,8 @@ bool query_serial(InCommand *incommand)
   char received;  
   if(SERIALPORT.available() > 0)
   {
-    received = SERIALPORT.read();
-    if ((received == '\r') || (received == '\n'))//Check for end of message 
+    received = SERIALPORT.read();    
+    if ((received == '\r') || (received == '\n') or (received == '\0'))//Check for end of message or break
     {
       if(index >= 1)//check if the termchars were extra from previous command and ignore EOM on its own
       {
@@ -310,6 +313,7 @@ void loop()
 void router(InCommand *incommand)
 {
   char * cmd = incommand->token[0];
+  digitalWrite(testpin, HIGH);
   if(strcmp("*IDN?", cmd) == 0)
   {
     idn();
@@ -466,11 +470,15 @@ void router(InCommand *incommand)
   {  
     write_dac_cal_eeprom(incommand);
   }
+  else if(strcmp("READ_DAC_CAL_EEPROM", cmd) == 0)
+  {  
+    read_dac_cal_eeprom(incommand);
+  }
   else
   {
     SERIALPORT.println("NOP");
   }
-
+  //digitalWrite(testpin, LOW);
 	//SERIALPORT.print(F("Free RAM = ")); //F function does the same and is now a built in library, in IDE > 1.0.0
   //SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
 }
@@ -2762,5 +2770,51 @@ void write_dac_cal_eeprom(InCommand * incommand)
 	send_ack();
 	writeeepromdaccal(ch, dacocal[ch], dacgcal[ch], factory);
 	
-	SERIALPORT.println("CAL_SAVED");
+	SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.print(dacocal[ch]);
+  SERIALPORT.print(",");
+  SERIALPORT.print(dacgcal[ch]);
+  SERIALPORT.println(",SAVED");
+}
+
+void read_dac_cal_eeprom(InCommand * incommand)
+{
+  if((incommand->paramcount != 2) && (incommand->paramcount != 3))
+  {
+    syntax_error();
+    return;
+  }  
+	uint8_t ch = atoi(incommand->token[1]);
+	if(ch >= NUMDACCHANNELS)
+	{
+		range_error();
+		return;
+	}
+  bool factory = false;
+
+	if(incommand->paramcount == 3)
+	{
+		if(strcmp(incommand->token[2], "FACTORY") == 0)
+    {
+      factory = true;
+    }
+    else
+    {
+    syntax_error();
+    return;
+    }
+	}
+
+	send_ack();
+	readeepromdaccal(ch, &dacocal[ch], &dacgcal[ch], factory);
+  writeDACoffset(ch, dacocal[ch]);
+  writeDACgain(ch, dacgcal[ch]);
+	SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.print(dacocal[ch]);
+  SERIALPORT.print(",");
+  SERIALPORT.println(dacgcal[ch]);
 }
