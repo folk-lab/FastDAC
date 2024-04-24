@@ -68,16 +68,17 @@ uint8_t readeepromdaccal(uint8_t ch, int8_t * offset, int8_t * gain, bool factor
   {
     return 1;
   }
+  uint32_t addroffset;
   if(factory)
   {
-    *offset = extprom.read((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR);
-    *gain = extprom.read((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR + 1);  
+    addroffset = EEPROM_DAC_FACT_CAL_ADDR;
   }
   else
   {
-    *offset = extprom.read((ch * 2) + EEPROM_DAC_CAL_ADDR);
-    *gain = extprom.read((ch * 2) + EEPROM_DAC_CAL_ADDR + 1);  
+    addroffset = EEPROM_DAC_CAL_ADDR;
   }
+  *offset = extprom.read(addroffset + (ch * 2));
+  *gain = extprom.read(addroffset + (ch * 2) + 1);  
   
   return 0;
 }
@@ -88,30 +89,103 @@ uint8_t writeeepromdaccal(uint8_t ch, int8_t offset, int8_t gain, bool factory)
   {
     return 1;
   }
+  uint32_t addroffset;
   if(factory)
   {
-    extprom.write((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR, offset);
-    extprom.write((ch * 2) + EEPROM_DAC_FACT_CAL_ADDR + 1, gain);  
+    addroffset = EEPROM_DAC_FACT_CAL_ADDR;
   }
   else
   {
-    extprom.write((ch * 2) + EEPROM_DAC_CAL_ADDR, offset);
-    extprom.write((ch * 2) + EEPROM_DAC_CAL_ADDR + 1, gain);  
+    addroffset = EEPROM_DAC_CAL_ADDR;
   }
+
+  extprom.write(addroffset + (ch * 2), offset);
+  extprom.write(addroffset + (ch * 2) + 1, gain);  
   
   return 0;
 }
 
 uint8_t readeepromadccal(uint8_t ch, uint8_t fw, uint32_t * zeroscale, uint32_t * fullscale, bool factory)
 {
+  if(ch >= NUMADCCHANNELS)
+  {
+    return 1;
+  }
+  if(fw >= EEPROM_ADC_NUM_FWS)
+  {
+    SERIALPORT.println("ADDRESS ERROR!");
+    return 1;
+  }
+  uint32_t offset;
+  if(factory)
+  {
+    offset = EEPROM_ADC_FACT_CAL_ADDR;
+  }
+  else
+  {
+    offset = EEPROM_ADC_CAL_ADDR;
+  }
+  uint8_t zerobyte, fullbyte, i;
+  uint32_t zerotemp = 0;
+  uint32_t fulltemp = 0;
+  for(i = 0; i < EEPROM_ADC_CH_VAR_SIZE; i++)
+  {
+    zerobyte = extprom.read(offset + (ch * EEPROM_ADC_CH_LEN) + (fw * EEPROM_ADC_CH_VAR_SIZE * 2) + i);
+    fullbyte = extprom.read(offset + (ch * EEPROM_ADC_CH_LEN) + (fw * EEPROM_ADC_CH_VAR_SIZE * 2) +  EEPROM_ADC_CH_VAR_SIZE + i);
+    zerotemp |= zerobyte << (i * 8);
+    fulltemp |= fullbyte << (i * 8);
+#ifdef DEBUGEEPROM
+    SERIALPORT.println(zerobyte);
+    SERIALPORT.println(zerotemp);
+    SERIALPORT.println(fullbyte);
+    SERIALPORT.println(fulltemp);
+#endif
+  }
 
-  
+  *zeroscale = zerotemp;
+  *fullscale = fulltemp;
+     
   return 0;
 }
 
 uint8_t writeeepromadccal(uint8_t ch, uint8_t fw, uint32_t zeroscale, uint32_t fullscale, bool factory)
 {
+  if(ch >= NUMADCCHANNELS)
+  {
+    return 1;
+  }
+  if(fw >= EEPROM_ADC_NUM_FWS)
+  {
+    SERIALPORT.println("ADDRESS ERROR!");
+    return 1;
+  }
+  uint32_t offset;
+  if(factory)
+  {
+    offset = EEPROM_ADC_FACT_CAL_ADDR;
+  }
+  else
+  {
+    offset = EEPROM_ADC_CAL_ADDR;
+  }
+  uint8_t zerobyte, fullbyte, i;
 
-  
+  for(i = 0; i < EEPROM_ADC_CH_VAR_SIZE; i++)
+  {
+    zerobyte = zeroscale & 0xFF;
+    fullbyte = fullscale & 0xFF;
+    extprom.write((offset + (ch * EEPROM_ADC_CH_LEN) + (fw * EEPROM_ADC_CH_VAR_SIZE * 2) + i), zerobyte);
+    extprom.write((offset + (ch * EEPROM_ADC_CH_LEN) + (fw * EEPROM_ADC_CH_VAR_SIZE * 2) +  EEPROM_ADC_CH_VAR_SIZE + i), fullbyte);
+#ifdef DEBUGEEPROM
+    SERIALPORT.println(zerobyte);
+    SERIALPORT.println(zeroscale);
+    SERIALPORT.println(fullbyte);
+    SERIALPORT.println(fullscale);
+#endif
+    zeroscale = zeroscale >> 8;
+    fullscale = fullscale >> 8;
+
+  }
+
   return 0;
 }

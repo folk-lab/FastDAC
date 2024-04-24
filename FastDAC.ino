@@ -35,7 +35,7 @@
 
 #define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
-//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info
+//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
@@ -241,7 +241,7 @@ bool query_serial(InCommand *incommand)
   if(SERIALPORT.available() > 0)
   {
     received = SERIALPORT.read();    
-    if ((received == '\r') || (received == '\n') or (received == '\0'))//Check for end of message or break
+    if ((received == '\r') || (received == '\n'))// || (received == '\0'))//Check for end of message
     {
       if(index >= 1)//check if the termchars were extra from previous command and ignore EOM on its own
       {
@@ -470,6 +470,23 @@ void router(InCommand *incommand)
   {  
     read_dac_cal_eeprom(incommand);
   }
+  else if(strcmp("WRITE_ADC_CAL_EEPROM", cmd) == 0)
+  {  
+    write_adc_cal_eeprom(incommand);
+  }
+  else if(strcmp("READ_ADC_CAL_EEPROM", cmd) == 0)
+  {  
+    read_adc_cal_eeprom(incommand);
+  }
+  else if(strcmp("INIT_ALL_EEPROM_VALUES", cmd) == 0)
+  {  
+    init_all_eeprom_values(incommand);
+  }
+  else if(strcmp("CAL_ALL_ADC_EEPROM_WITH_DAC", cmd) == 0)
+  {  
+    cal_all_adc_eeprom_with_dac(incommand);
+  }
+  
   else
   {
     SERIALPORT.println("NOP");
@@ -528,19 +545,32 @@ void read_convert_time(InCommand *incommand)
   SERIALPORT.println(readADCConversionTime(adcChannel));
 }
 
-int readADCConversionTime(int ch)
+int32_t readADCConversionTime(uint8_t ch)
 {
-  if (ch < 0 || ch > 3)
+  if (ch >= NUMADCCHANNELS)
   {
     range_error();
     return -1;
   }
-  byte cr;
-  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | ch); //Read conversion time register
-  cr=SPI.transfer(adc,0); //Read back the CT register
+  byte fw;
+  fw = readADCfw(ch);
   //SERIALPORT.println(fw);
-  int contime = ((int)(((cr&127)*128+249)/6.144)+0.5);
+  int contime = ((int)((fw * 128 + 249) / 6.144 ) + 0.5);
   return contime;
+}
+
+uint8_t readADCfw(uint8_t ch)
+{
+  if (ch >= NUMADCCHANNELS)
+  {
+    range_error();
+    return 0;
+  }
+  uint8_t fw;
+  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | ch); //Read conversion time register
+  fw = SPI.transfer(adc,0); //Read back the CT register
+  fw &= 0x7F; //get lowest 7 bits
+  return fw;
 }
 
 //// DAC ////
@@ -605,16 +635,22 @@ void convert_time(InCommand *incommand)
 
   send_ack();
 
-  fw |= 0x80; //enable chopping
+  //fw |= 0x80; //enable chopping
+  //SPI.transfer(adc, ADC_CHCONVTIME | adcChannel); //Write conversion time register
+  //SPI.transfer(adc, fw); //Write 'filter word' (conversion time)
 
-  SPI.transfer(adc, ADC_CHCONVTIME | adcChannel); //Write conversion time register
-  SPI.transfer(adc, fw); //Write 'filter word' (conversion time)
+  writeADCfw(adcChannel, fw);
   delayMicroseconds(100);
-  SPI.transfer(adc, ADC_REGREAD | ADC_CHCONVTIME | adcChannel); //Read conversion time register
-  cr=SPI.transfer(adc,0); //Read back the CT register
-
-  int convtime = ((int)(((cr&127)*128+249)/6.144)+0.5);
+  fw = readADCfw(adcChannel);
+  int convtime = ((int)(((fw) * 128 + 249) / 6.144) + 0.5);
   SERIALPORT.println(convtime);
+}
+
+void writeADCfw(uint8_t ch, uint8_t fw)
+{
+  fw |= 0x80; //enable chopping
+  SPI.transfer(adc, ADC_CHCONVTIME | ch); //Write conversion time register
+  SPI.transfer(adc, fw); //Write 'filter word' (conversion time)
 }
 
 //// DAC ////
@@ -1229,7 +1265,7 @@ void cal_adc_with_dac(InCommand *incommand)
   {
     writeDAC(ch, 0.0, true); // mV
   }
-  delayMicroseconds(3000); // wait 3 ms
+  delayMicroseconds(CAL_SETTLE_TIME); // wait cal settle time
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     SERIALPORT.print("ch");
@@ -1243,7 +1279,7 @@ void cal_adc_with_dac(InCommand *incommand)
   {
     writeDAC(ch, 10000.0, true); // mV
   }
-  delayMicroseconds(3000); // wait 3ms
+  delayMicroseconds(CAL_SETTLE_TIME); // wait cal settle time
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
     SERIALPORT.print("ch");
@@ -2712,4 +2748,216 @@ void read_dac_cal_eeprom(InCommand * incommand)
   SERIALPORT.print(dacocal[ch]);
   SERIALPORT.print(",");
   SERIALPORT.println(dacgcal[ch]);
+}
+
+void write_adc_cal_eeprom(InCommand * incommand)
+{
+  if((incommand->paramcount != 2) && (incommand->paramcount != 3))
+  {
+    syntax_error();
+    return;
+  }  
+	uint8_t ch = atoi(incommand->token[1]);
+	if(ch >= NUMADCCHANNELS)
+	{
+		range_error();
+		return;
+	}
+  bool factory = false;
+
+	if(incommand->paramcount == 3)
+	{
+		if(strcmp(incommand->token[2], "FACTORY") == 0)
+    {
+      if(digitalRead(EEPROM_WP_PIN) == HIGH)
+  	  {
+    	  SERIALPORT.println("WRITE_PROTECTED");
+    	  return;
+  	  }
+      factory = true;
+    }
+    else
+    {
+    syntax_error();
+    return;
+    }
+	}
+	send_ack();
+
+  uint32_t zeroscale = readADCzerocal(ch);
+  uint32_t fullscale = readADCfullcal(ch);
+
+  uint8_t fw = readADCfw(ch);
+	writeeepromadccal(ch, fw, zeroscale, fullscale, factory);
+	
+	SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.print(zeroscale);
+  SERIALPORT.print(",");
+  SERIALPORT.print(fullscale);
+  SERIALPORT.println(",SAVED");
+}
+
+void read_adc_cal_eeprom(InCommand * incommand)
+{
+  if((incommand->paramcount != 2) && (incommand->paramcount != 3))
+  {
+    syntax_error();
+    return;
+  }  
+	uint8_t ch = atoi(incommand->token[1]);
+	if(ch >= NUMADCCHANNELS)
+	{
+		range_error();
+		return;
+	}
+  bool factory = false;
+
+	if(incommand->paramcount == 3)
+	{
+		if(strcmp(incommand->token[2], "FACTORY") == 0)
+    {
+      factory = true;
+    }
+    else
+    {
+    syntax_error();
+    return;
+    }
+	}
+
+	send_ack();
+  uint32_t zeroscale, fullscale;
+  uint8_t fw = readADCfw(ch);
+	readeepromadccal(ch, fw, &zeroscale, &fullscale, factory);
+  writeADCcal(ch, zeroscale, fullscale);
+	SERIALPORT.print("ch");
+  SERIALPORT.print(ch);
+  SERIALPORT.print(",");
+  SERIALPORT.print(zeroscale);
+  SERIALPORT.print(",");
+  SERIALPORT.println(fullscale);
+}
+
+void init_all_eeprom_values(InCommand * incommand)
+{
+  bool factory = false;
+  if((incommand->paramcount != 1) && (incommand->paramcount != 2))
+  {
+    syntax_error();
+    return;
+  }
+  if(incommand->paramcount == 2)
+	{
+		if(strcmp(incommand->token[1], "FACTORY") == 0)
+    {
+      if(digitalRead(EEPROM_WP_PIN) == HIGH)
+  	  {
+    	  SERIALPORT.println("WRITE_PROTECTED");
+    	  return;
+  	  }
+      factory = true;
+    }
+    else
+    {
+    syntax_error();
+    return;
+    }
+	}
+  send_ack();
+  SERIALPORT.print("INITIALIZING ALL EEPROM VALUES...");
+  uint8_t ch, fw;
+  for(ch = 0; ch < NUMADCCHANNELS; ch++)
+  {
+    for(fw = 0; fw < EEPROM_ADC_NUM_FWS; fw++)
+    {
+      writeeepromadccal(ch, fw, ADC_DEFAULT_ZEROSCALE, ADC_DEFAULT_ZEROSCALE, factory);
+    }
+    SERIALPORT.print("Initialized ADC CH");
+    SERIALPORT.print(ch);
+    SERIALPORT.print(",");
+  }
+  for(ch = 0; ch < NUMDACCHANNELS; ch++)
+  {
+    writeeepromdaccal(ch, DAC_DEFAULT_OFFSET, DAC_DEFAULT_GAIN, factory);
+    SERIALPORT.print("Initialized DAC CH");
+    SERIALPORT.print(ch);
+    SERIALPORT.print(",");
+  }
+  SERIALPORT.println("WRITE_FINISHED");
+}
+
+void cal_all_adc_eeprom_with_dac(InCommand * incommand)
+{
+  bool factory = false;
+  if((incommand->paramcount != 1) && (incommand->paramcount != 2))
+  {
+    syntax_error();
+    return;
+  }
+  if(incommand->paramcount == 2)
+	{
+		if(strcmp(incommand->token[1], "FACTORY") == 0)
+    {
+      if(digitalRead(EEPROM_WP_PIN) == HIGH)
+  	  {
+    	  SERIALPORT.println("WRITE_PROTECTED");
+    	  return;
+  	  }
+      factory = true;
+    }
+    else
+    {
+    syntax_error();
+    return;
+    }
+	}
+  send_ack();
+  SERIALPORT.print("CAL ALL ADC EEPROM VALUES WITH DAC...");
+  uint8_t ch, fw;
+  for(fw = 2; fw < EEPROM_ADC_NUM_FWS; fw++)
+  {
+      uint32_t zeroscale[NUMADCCHANNELS], fullscale[NUMADCCHANNELS];
+      //write the filter word (conversion time) and set the DACs to 0
+      for(ch = 0; ch < NUMADCCHANNELS; ch++)
+      {
+        writeADCfw(ch, fw);
+        uint8_t readfw = readADCfw(ch);
+        if(readfw != fw)        
+        {
+          SERIALPORT.println("ADC FW ERROR!");
+          return;
+        }
+        writeDAC(ch, 0.0, true); // mV
+      }
+      delayMicroseconds(CAL_SETTLE_TIME);
+      
+      //get each ch zero scale value
+      for(ch = 0; ch < NUMADCCHANNELS; ch++)
+      {
+        zeroscale[ch] = cal_adc_ch_zero_scale(ch);        
+      }
+      //set DACs to fullscale
+      for(ch = 0; ch < NUMADCCHANNELS; ch++)
+      {
+        writeDAC(ch, 10000.0, true); // mV
+      }
+      delayMicroseconds(CAL_SETTLE_TIME); // wait cal settle time
+      //get each ch full scale value 
+      for(ch = 0; ch < NUMADCCHANNELS; ch++)
+      {
+        fullscale[ch] = cal_adc_ch_full_scale(ch);
+      }
+      //write each channel to eeprom
+      for(ch = 0; ch < NUMADCCHANNELS; ch++)
+      {
+        writeeepromadccal(ch, fw, zeroscale[ch], fullscale[ch], factory);
+      }
+      SERIALPORT.print("FW ");
+      SERIALPORT.print(fw);
+      SERIALPORT.print(" SAVED, ");
+  }  
+  SERIALPORT.println("CALIBRATION_FINISHED");
+  
 }

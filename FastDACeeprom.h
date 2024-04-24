@@ -5,6 +5,9 @@
 #include "FastDACdefs.h"
 #include "SparkFun_External_EEPROM.h"
 
+//#define DEBUGEEPROM //uncomment for EEPROM debug info over serial port
+
+
 #define EEPROM_I2C_ADDRESS 0x51 //i2c address of 24LC256 EEPROM on Fastdac
 #define EEPROM_I2C_CLOCK 400000L //400kHz i2c clock
 #define EEPROM_SIZE 256 //Size of EEPROM in kbits 256kbits = 32768 bytes
@@ -24,13 +27,24 @@
 
 #define EEPROM_ADC_CAL_ADDR EEPROM_DAC_FACT_CAL_ADDR + EEPROM_DAC_CAL_LEN
 
+#define DAC_DEFAULT_OFFSET 0
+
+#define DAC_DEFAULT_GAIN 0
+
+#define ADC_DEFAULT_ZEROSCALE 0x800000
+
+#define ADC_DEFAULT_FULLSCALE 0x200000
+
 //Each ADC channel has 3 bytes for zero scale, and 3 bytes for full scale, per 'Filter Word', Filter word can be 0 to 127 (128)
 #define EEPROM_ADC_NUM_FWS 128
 
-#define EEPROM_ADC_CAL_LEN NUMADCCHANNELS * 6 * EEPROM_ADC_NUM_FWS
+#define EEPROM_ADC_CAL_LEN NUMADCCHANNELS * (EEPROM_ADC_CH_VAR_SIZE * 2) * EEPROM_ADC_NUM_FWS
 
 #define EEPROM_ADC_FACT_CAL_ADDR EEPROM_ADC_CAL_ADDR + EEPROM_ADC_CAL_LEN
 
+#define EEPROM_ADC_CH_VAR_SIZE 3
+
+#define EEPROM_ADC_CH_LEN (EEPROM_ADC_CH_VAR_SIZE * 2) * EEPROM_ADC_NUM_FWS
 
 
 void eepromtest(void);

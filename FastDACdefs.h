@@ -16,7 +16,7 @@
 #define NUMDACCHANNELS 8
 #define NUMADCCHANNELS 4
 
-
+#define CAL_SETTLE_TIME 3000 //time in us for DACs to settle before auto cal ADC
 
 //AD7734 Register addresses
 #define ADC_IO 0x01
