@@ -208,7 +208,6 @@ void setup()
   {
     SERIALPORT.println("ERROR Initializing EEPROM!");
   }
-  //loaddefaultcals(); //Only useful if per-unit cals are done, otherwise it's way off
   
 	loaddaccals();
 	//Initialize saved DAC setpoints to 0
@@ -216,6 +215,7 @@ void setup()
   {
     g_DACsetpoint[i] = 0;
   }
+  loadadccals();
 
   attachInterrupt(digitalPinToInterrupt(drdy), intset, FALLING);//Interrupt has to be attached once for the priority to stick
   NVIC_SetPriority(PIOC_IRQn, 1); //Make ADC interrupt priority lower than UART
@@ -642,6 +642,11 @@ void convert_time(InCommand *incommand)
   writeADCfw(adcChannel, fw);
   delayMicroseconds(100);
   fw = readADCfw(adcChannel);
+
+  //Automatically load calibration for this fw
+  uint32_t zeroscale, fullscale;
+  readeepromadccal(adcChannel, fw, &zeroscale, &fullscale, false);
+  writeADCcal(adcChannel, zeroscale, fullscale);
   int convtime = ((int)(((fw) * 128 + 249) / 6.144) + 0.5);
   SERIALPORT.println(convtime);
 }
@@ -1227,7 +1232,7 @@ void default_cal(InCommand *incommand)
   SERIALPORT.println("CALIBRATION_CHANGED");
 }
 
-void loaddaccals()
+void loaddaccals(void)
 {
   uint8_t ch = 0;
   /*
@@ -1247,6 +1252,19 @@ void loaddaccals()
 }
 
 //// ADC ////
+
+void loadadccals(void)
+{  
+  //load user ADC cals
+  uint8_t ch, fw;
+  uint32_t zeroscale, fullscale;
+  for(ch = 0; ch < NUMADCCHANNELS; ch++)
+  {
+    fw = readADCfw(ch);
+    readeepromadccal(ch, fw, &zeroscale, &fullscale, false);
+    writeADCcal(ch, zeroscale, fullscale);
+  }
+}
 
 void cal_adc_with_dac(InCommand *incommand)
 {
@@ -1899,6 +1917,7 @@ void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t
     {
       timer = nowmicros;
       writeDAC(dacChannel, v1+(v2-v1)*j/(nSteps-1), true); // takes mV
+      //SERIALPORT.println(v1+(v2-v1)*j/(nSteps-1));
       j++;
     }
     //Check for STOP command   
@@ -1940,6 +1959,7 @@ float dacDataSend(int ch, float voltage)
 {
   digitalWrite(data, HIGH);
   DACintegersend(ch, voltageToInt16(voltage/1000.0));
+  //SERIALPORT.println(voltageToInt16(voltage/1000.0));
   float voltreturn;
   voltreturn = readDAC(ch);
   return voltreturn;
