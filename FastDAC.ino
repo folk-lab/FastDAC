@@ -73,7 +73,8 @@ const int err=35;
 const int testpin = 11;
 
 
-float DAC_FULL_SCALE = 10.0;
+float g_dac_full_scale = 10.0;
+float g_dac_bit_res = g_dac_full_scale / 32768.0;
 
 volatile int16_t g_DACsetpoint[NUMDACCHANNELS];//global array for current DAC setpoints, only written to in DACintegersend()
 
@@ -674,7 +675,7 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
     return;
   }
   float setpoint = atof(incommand->token[2]);
-  if((abs(setpoint) / 1000.0) > DAC_FULL_SCALE)
+  if((abs(setpoint) / 1000.0) > g_dac_full_scale)
   {
     range_error();
     return;
@@ -755,7 +756,7 @@ void int_ramp(InCommand *incommand)
       }
       float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
       float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
-      if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
+      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
       {
         range_error();
         return;
@@ -1140,7 +1141,7 @@ void set_pid_lims(InCommand *incommand)
   //g_pidparam[0].dacmax = DB[2].toFloat();
   g_pidparam[0].dacmin = atof(incommand->token[1]);
   g_pidparam[0].dacmax = atof(incommand->token[2]);
-  if((abs(g_pidparam[0].dacmin) / 1000.0 > DAC_FULL_SCALE) || (abs(g_pidparam[0].dacmax) / 1000.0 > DAC_FULL_SCALE))
+  if((abs(g_pidparam[0].dacmin) / 1000.0 > g_dac_full_scale) || (abs(g_pidparam[0].dacmax) / 1000.0 > g_dac_full_scale))
   {
     range_error();
     return;
@@ -1551,7 +1552,8 @@ void full_scale(InCommand *incommand)
     return;
   }
   send_ack();
-  DAC_FULL_SCALE = dacscale;
+  g_dac_full_scale = dacscale;
+  g_dac_bit_res = g_dac_full_scale / 32768.0;
   SERIALPORT.println("FULL_SCALE_UPDATED");
 }
 
@@ -1569,7 +1571,7 @@ void dac_offset_adj(InCommand *incommand)
     return;
   }
   float offset = atof(incommand->token[2]);
-  if((offset > (DAC_FULL_SCALE * 2.0 * 16 / 65536.0)) || (offset < (DAC_FULL_SCALE * -2.0 * 15.875 / 65536.0)))
+  if((offset > (g_dac_full_scale * 2.0 * 16 / 65536.0)) || (offset < (g_dac_full_scale * -2.0 * 15.875 / 65536.0)))
   {
     range_error();
     return;
@@ -1582,7 +1584,7 @@ void dac_offset_adj(InCommand *incommand)
 void calDACoffset(byte ch, float offset)
 {
   int8_t numsteps;
-  float stepsize = (DAC_FULL_SCALE * 2.0) / (65536.0 * 8.0); //stepsize is 1/8 of a 16-bit LSB
+  float stepsize = (g_dac_full_scale * 2.0) / (65536.0 * 8.0); //stepsize is 1/8 of a 16-bit LSB
 
   if(offset < 0)
   {
@@ -1616,7 +1618,7 @@ void dac_gain_adj(InCommand *incommand)
     return;
   }
   float offset = atof(incommand->token[2]);
-  if((offset > (DAC_FULL_SCALE * 2.0 * 16 / 65536.0)) || (offset < (DAC_FULL_SCALE * -2.0 * 15 / 65536.0)))
+  if((offset > (g_dac_full_scale * 2.0 * 16 / 65536.0)) || (offset < (g_dac_full_scale * -2.0 * 15 / 65536.0)))
   {
     range_error();
     return;
@@ -1633,7 +1635,7 @@ void calDACgain(byte ch, float offset)
   //int n;
   //String buffer;
   //char buffertemp [100];
-  float stepsize = (DAC_FULL_SCALE * 2.0) / (65536.0 * 2.0); //stepsize is 1/2 of a 16-bit LSB
+  float stepsize = (g_dac_full_scale * 2.0) / (65536.0 * 2.0); //stepsize is 1/2 of a 16-bit LSB
   numsteps = (int8_t)(offset / stepsize);
 
   if(offset < 0)
@@ -1908,7 +1910,7 @@ void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t
 {
   digitalWrite(data,HIGH);
   uint32_t timer = micros();
-  int j = 0;
+  uint32_t j = 0;
   while(j < nSteps)
   {
     uint32_t nowmicros = micros();
@@ -1995,56 +1997,70 @@ float int16ToVoltage(int16_t data)
 // map 16bit int to float voltage
 {
   float voltage;
-
+  voltage = data * g_dac_full_scale/32768.0;
+  /*
   if (data >= 0)
   {
-    voltage = data*DAC_FULL_SCALE/32767;
+    voltage = data * g_dac_full_scale/32767;
   }
   else
   {
-    voltage = data*DAC_FULL_SCALE/32768;
+    voltage = data * g_dac_full_scale/32768;
   }
+  */
   return voltage;
 }
 
 int16_t voltageToInt16(float voltage)
 // map float voltage to 16bit int
 {
-  if (voltage > DAC_FULL_SCALE || voltage < -1*DAC_FULL_SCALE)
+  if (abs(voltage) > g_dac_full_scale)
   {
     error();
     return 0;
   }
-  //return (voltage*32768)/DAC_FULL_SCALE;
+  if(voltage > (g_dac_full_scale - g_dac_bit_res))
+  {
+    voltage = g_dac_full_scale - g_dac_bit_res;
+  }
+  return  (int16_t)((voltage / g_dac_full_scale) * 0x8000); 
   
+  /*
   else if (voltage >= 0)
   {
-    return voltage*32767/DAC_FULL_SCALE;
+    return voltage*32767/g_dac_full_scale;
   }
   else
   {
-    return voltage*32768/DAC_FULL_SCALE;
+    return voltage*32768/g_dac_full_scale;
   }
-  
+  */  
 }
 
 int32_t voltageToInt32(float voltage)
 // map float voltage to 32bit int
 {
   int32_t calcint;
-  if (voltage > DAC_FULL_SCALE || voltage < -1*DAC_FULL_SCALE)
+  if (abs(voltage) > g_dac_full_scale)
   {
     calcint = 0;
     error();
   }
+  if(voltage > (g_dac_full_scale - g_dac_bit_res))
+  {
+    voltage = g_dac_full_scale - g_dac_bit_res;
+  }
+  calcint = (int32_t)((voltage/g_dac_full_scale) * 0x80000000);
+  /*
   else if(voltage >=0)
   {
-    calcint = (int32_t)((voltage/DAC_FULL_SCALE) * 0x7FFFFFFF);
+    calcint = (int32_t)((voltage/g_dac_full_scale) * 0x7FFFFFFF);
   }
   else
   {
-    calcint = (int32_t)((voltage/DAC_FULL_SCALE) * 0x80000000);
+    calcint = (int32_t)((voltage/g_dac_full_scale) * 0x80000000);
   }
+  */
   return calcint;
 }
 
@@ -2175,7 +2191,7 @@ void add_wave(InCommand *incommand)
   for(uint32_t i = 0; i < numsetpoints; i++)
   {
     float setvolt = atof(incommand->token[(i * 2) + 2]) / 1000.0;
-    if(abs(setvolt) > DAC_FULL_SCALE)
+    if(abs(setvolt) > g_dac_full_scale)
     {
       range_error();
       return;
@@ -2398,7 +2414,7 @@ void awg_ramp(InCommand *incommand)
       }
       float dacstartvoltage = atof(incommand->token[i+4+g_numwaves])/1000.0;
       float dacendvoltage = atof(incommand->token[i+4+g_numwaves+g_numrampDACchannels])/1000.0;
-      if((abs(dacstartvoltage) > DAC_FULL_SCALE) || (abs(dacendvoltage) > DAC_FULL_SCALE))
+      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
       {
         range_error();
         return;
