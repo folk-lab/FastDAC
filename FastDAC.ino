@@ -2908,7 +2908,7 @@ void init_all_eeprom_values(InCommand * incommand)
   {
     for(fw = 0; fw < EEPROM_ADC_NUM_FWS; fw++)
     {
-      writeeepromadccal(ch, fw, ADC_DEFAULT_ZEROSCALE, ADC_DEFAULT_ZEROSCALE, factory);
+      writeeepromadccal(ch, fw, ADC_DEFAULT_ZEROSCALE, ADC_DEFAULT_FULLSCALE, factory);
     }
     SERIALPORT.print("Initialized ADC CH");
     SERIALPORT.print(ch);

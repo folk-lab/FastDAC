@@ -17,10 +17,6 @@ If the operation is recognized but some parameters are incorrect, it will return
 
 If the operation is recognized and all parameters are correct, it will return `ACK\r\n` followed by the expected response which is ended by `\r\n`.
 
-**to be rewritten**
-A note about calibrations; The FastDAC is pre-calibrated using a HP34401A DMM. Included with the Arduino Due code is a header file, `FastDACx.h` from which the calibration settings are loaded on reset. Since the Arduino Due does not have EEPROM, the intention is that this file is renamed and recompiled for each new unit (we could also build an EEPROM into future units). The DAC channels should have a stable calibration, independent of various settings, largely eliminating the need for re-calibration in the short term.
-
-The ADC channels are pre-calibrated for the default conversion time of 394µs, and the calibration can change with different conversion times, especially for conversion times faster than ~300µs. It is recommended to run the calibration routines, and record the calibration values, for the various conversion times that are intended to be used.
 
 ## `*IDN?` and `*RDY?`
 
@@ -105,7 +101,7 @@ Returns:
 
 ## CONVERT_TIME
 
-`CONVERT_TIME` sets the conversion time, in µs, for each ADC channel, which is the time it takes to digitize the analog signal. The sum of the conversion times of all selected channels will determine overall sample rate.  Shorter conversion times result in more measured noise; Refer to the AD7734 datasheet for typical noise vs conversion times (chopping is always enabled). For the AD7734, conversion times faster than approximately 300µs will start to exhibit a linear calibration offset >1mV at full range. If desired, this offset can be calibrated out using the provided calibration functions. Maximum conversion time: 2686µs. Minimum conversion time: 82µs. The function will return the actual closest possible setting.
+`CONVERT_TIME` sets the conversion time, in µs, for each ADC channel, which is the time it takes to digitize the analog signal. The sum of the conversion times of all selected channels will determine overall sample rate.  Shorter conversion times result in more measured noise; Refer to the AD7734 datasheet for typical noise vs conversion times (chopping is always enabled). The correct calibration for the selected channel and conversion time will be loaded from the `USER` area of the EEPROM. Maximum conversion time: 2686µs. Minimum conversion time: 82µs. The function will return the actual closest possible setting.
 
 Syntax:  
 `CONVERT_TIME,{adc channel},{conversion time in µs}`
@@ -261,9 +257,120 @@ Example (Setting the full scale range to 5V):
 Returns:  
 `FULL_SCALE_UPDATED`
 
+# EEPROM/CALIBRATION FUNCTIONS
+
+The onboard EEPROM of the FastDAC is used to store ADC and DAC calibration data, as well as the ID string for the units. There are 2 areas of the EEPROM, `USER` and `FACTORY`. In order to write to the `FACTORY` area, a write-protect jumper from pin 13 to GND must be installed inside the unit, on the Arduino. It is recommended to only install this when necessary to avoid accidentally overwriting the `FACTORY` area, and instead use the `USER` area for most calibration functions.
+
+The EEPROM stores a calibration for every possible conversion time for each ADC channel, in both the `FACTORY` and `USER` areas. The DAC channels also have a calibration in each area, but only a single calibration as there is no conversion time associated with the DAC. The ID string only exists in the `FACTORY` area. For reading/writing to `FACTORY` areas, most functions require the extra `FACTORY` parameter added to end of the command.
+
+When the FastDAC is first powered up, the calibrations are loaded from the `USER` area for the default conversion time of 394µs. When the ADC `CONVERT_TIME` function is used, the FastDAC automatically loads the associated calibration from the `USER` area.
+
+## WRITE_ID_EEPROM
+
+`WRITE_ID_EEPROM` is used to write a new `{unit id}` string to the FastDAC, which will be returned by the `*IDN?` command, in the format `FASTDAC_UNIT-{unit id}_{firmware version}`. The write protect jumper must be installed.
+
+Syntax:  
+`WRITE_ID_EEPROM,{unit id}`
+
+Example:  
+`WRITE_ID_EEPROM,FOLK6`
+
+Returns:
+`ID_SAVED`
+
+## INIT_ALL_EEPROM_VALUES
+
+`INIT_ALL_EEPROM_VALUES` is used to overwrite all ADC and DAC cals in the EEPROM with default values. This would normally be used when a FastDAC is powered up or programmed for the first time and does not have valid calibration values in the EEPROM. This will result in the default un-calibrated behaviour from the ADCs and DACs
+
+Syntax:  
+`INIT_ALL_EEPROM_VALUES,FACTORY (optional)`
+
+Example:  
+`INIT_ALL_EEPROM_VALUES`
+
+Returns:
+`INITIALIZING ALL EEPROM VALUES...Initialized ADC CH0,{...}Initialized DAC CH7,WRITE_FINISHED`
+
+## WRITE_DAC_CAL_EEPROM
+
+`WRITE_DAC_CAL_EEPROM` is used to save the current calibration of a DAC channel to the `USER` or `FACTORY` area of the eeprom.
+
+Syntax:  
+`WRITE_DAC_CAL_EEPROM,{DAC channel cal to save},FACTORY (optional)`
+
+Returns:
+`ch{DAC channel},{offset cal},{gain cal},SAVED`
+
+Example:  
+`WRITE_DAC_CAL_EEPROM,2`
+
+Returns:  
+`ch2,-6,25,SAVED`
+
+## READ_DAC_CAL_EEPROM
+
+`READ_DAC_CAL_EEPROM` is used to load a DAC channel calibration from the `USER` or `FACTORY` area of the eeprom. The DAC channel automatically starts using the newly loaded calibration.
+
+Syntax:  
+`READ_DAC_CAL_EEPROM,{DAC channel cal to read},FACTORY (optional)`
+
+Returns:
+`ch{DAC channel},{offset cal},{gain cal}`
+
+Example:  
+`READ_DAC_CAL_EEPROM,2,FACTORY`
+
+Returns:  
+`ch2,-6,25`
+
+## WRITE_ADC_CAL_EEPROM
+
+`WRITE_ADC_CAL_EEPROM` is used to save the current calibration of a ADC channel to the `USER` or `FACTORY` area of the eeprom. The channel's conversion time is automatically checked and the appropriate memory location written to.
+
+Syntax:  
+`WRITE_ADC_CAL_EEPROM,{ADC channel cal to save},FACTORY (optional)`
+
+Returns:
+`ch{ADC channel},{zero cal},{fullscale cal},SAVED`
+
+Example:  
+`WRITE_ADC_CAL_EEPROM,1`
+
+Returns:  
+`ch1,8388887,2096806,SAVED`
+
+## READ_ADC_CAL_EEPROM
+
+`READ_ADC_CAL_EEPROM` is used to save load an ADC channel calibration from the `USER` or `FACTORY` area of the eeprom. The channel's conversion time is automatically checked and the appropriate memory location read from. The ADC channel automatically starts using the newly loaded calibration.
+
+Syntax:  
+`READ_ADC_CAL_EEPROM,{ADC channel cal to read},FACTORY (optional)`
+
+Returns:
+`ch{ADC channel},{zero cal},{fullscale cal}`
+
+Example:  
+`READ_ADC_CAL_EEPROM,3,FACTORY`
+
+Returns:  
+`ch3,82,2096886`
+
+## CAL_ALL_ADC_EEPROM_WITH_DAC
+
+`CAL_ALL_ADC_EEPROM_WITH_DAC` uses DAC channels 0-3 connected to ADC channels 0-3 to calibrate all 125 possible conversion times of each ADC channels and save the calibrations to EEPROM. The user must first externally connect DAC channels 0-3 to ADC channels 0-3.
+
+Syntax:  
+`CAL_ALL_ADC_EEPROM_WITH_DAC,FACTORY (optional)`
+
+Example:  
+`CAL_ALL_ADC_EEPROM_WITH_DAC`
+
+Returns:
+`CAL ALL ADC EEPROM VALUES WITH DAC...FW 2 SAVED,{....}, FW 127 SAVED, CALIBRATION_FINISHED`
+
 # MASTER/SLAVE FUNCTIONS
 
-As of June 2020, new units have optical clock and sync inputs and outputs to allow synchronization between units. Functions that support sync are `SPEC_ANA`, `INT_RAMP`, and `AWG_RAMP`. Each unit must have the same number of ADC channels being sampled, and the conversion time must be the same. One unit must be set to MASTER, all others to SLAVE. Units can be daisy-chained with the MASTER unit's CLK_OUT and SYNC_OUT connected to the first SLAVE unit's CLK_IN and SYNC_IN, and so on for each additional slave. The general sequence would be:
+The FastDAC has optical clock and sync inputs and outputs to allow synchronization between units. Functions that support sync are `SPEC_ANA`, `INT_RAMP`, and `AWG_RAMP`. Each unit must have the same number of ADC channels being sampled, and the conversion time must be the same. One unit must be set to MASTER, all others to SLAVE. Units can be daisy-chained with the MASTER unit's CLK_OUT and SYNC_OUT connected to the first SLAVE unit's CLK_IN and SYNC_IN, and so on for each additional slave. The general sequence would be:
 1. PC uses `SET_MODE` to select one unit as MASTER, and all others as SLAVE. It can take up to 20 seconds for the PLL to relock switching between MASTER and SLAVE if the clock frequency is substantially different, which can be checked with `CHECK_SYNC`
 2. PC sends `ARM_SYNC` to MASTER
 3. PC sends `INT_RAMP` (for example) to each SLAVE unit, which will `ACK` when ready, and wait for the SYNC signal from MASTER
