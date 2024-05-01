@@ -38,7 +38,7 @@
 
 #define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
-//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
+#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
@@ -82,7 +82,6 @@ float g_dac_bit_res = g_dac_full_scale / 32768.0;
 volatile int16_t g_DACsetpoint[NUMDACCHANNELS];//global array for current DAC setpoints, only written to in DACintegersend()
 
 //Ramp interrupt global variables
-volatile uint32_t g_buffindex = 0;
 volatile bool g_done = false;
 volatile bool g_firstsamples = true;
 volatile uint8_t g_numrampADCchannels;
@@ -125,7 +124,7 @@ typedef struct ARGramp
   uint32_t numsetpoints;
   uint8_t numDACchannels;
   uint8_t DACchanselect[NUMDACCHANNELS];
-  uint32_t setpointcount;
+  //uint32_t setpointcount;
 }ARGramp;
 
 ARGramp g_argramp[ARGMAXRAMPS];
@@ -353,6 +352,10 @@ void router(InCommand *incommand)
   {  
     int_ramp(incommand);
   }
+  else if(strcmp("INT_ARG_RAMP", cmd) == 0)  
+  {  
+    int_arg_ramp(incommand);
+  }  
   else if(strcmp("SPEC_ANA", cmd) == 0)  
   {  
     spec_ana(incommand);
@@ -453,6 +456,10 @@ void router(InCommand *incommand)
   {  
     awg_ramp(incommand);
   }
+  else if(strcmp("AWG_ARG_RAMP", cmd) == 0)  
+  {  
+    awg_arg_ramp(incommand);
+  }  
   else if(strcmp("START_PID", cmd) == 0)
   {  
     start_pid(incommand);    
@@ -728,207 +735,6 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
   return;
 }
 
-void int_ramp(InCommand *incommand)
-{
-  int i;
-    //check for minimum number of parameters
-  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
-  {
-    return;
-  }
-  
-  if(incommand->paramcount < 4)
-  {
-    syntax_error();
-    return;
-  }
-
-  //String channelsDAC = DB[1];
-  //g_numrampDACchannels = channelsDAC.length();
-  char * channelsDAC = incommand->token[1];
-  char * channelsADC = incommand->token[2];
-  g_numrampDACchannels = strlen(channelsDAC);  
-  g_numrampADCchannels = strlen(channelsADC);
-  //check if no DACs selected
-  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
-  {
-    //SERIALPORT.println("NO DACS");
-    g_numrampDACchannels = 0;
-  }
-
-  g_done = false;  
-  g_firstsamples = true;
-  g_stepcount = 0;
-  g_loopcount = 0;
-  g_numloops = 1; //take only 1 sample at each step
-  g_numwaves = 0; //no arbitrary waves for int_ramp
-  //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (incommand->paramcount != g_numrampDACchannels * 2 + 4))
-  {
-    syntax_error();
-    return;
-  }  
-  //check if no DACs selected
-  if(g_numrampDACchannels != 0)
-  {
-    //define DAC channels and check range
-    for(i = 0; i < g_numrampDACchannels; i++)
-    {
-      g_DACchanselect[i] = channelsDAC[i] - '0';
-      if(g_DACchanselect[i] >= NUMDACCHANNELS)
-      {
-        range_error();
-        return;
-      }
-      float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
-      float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
-      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
-      {
-        range_error();
-        return;
-      }
-      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
-      g_DACendpoint[i] = voltageToInt32(dacendvoltage);
-    }
-  }
-  //define ADC channels and check range
-  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
-  {  
-    g_ADCchanselect[i] = channelsADC[i] - '0';
-    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
-    {
-      range_error();
-      return;
-    }
-  }
-  //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
-
-  g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+3]);
-  #ifdef DEBUGRAMP
-  SERIALPORT.print("numsteps: ");
-  SERIALPORT.println(g_numsteps);
-  #endif  
-  //configure DAC channels
-  g_configurerampDACchannels();
-  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
-  ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
-  ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-
-  g_configurerampADCchannels();
-
-  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
-  
-  //Check for SYNC again
-  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
-  {
-    g_rampadcidle();
-    return;
-  }
-  digitalWrite(data,HIGH);
-
-  send_ack();//send ack and immediately attach interrupt
-  
-  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
-  //attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
-
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
-  while(!g_done)
-  {
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)      
-      {
-        break;
-      }     
-    }
-  }  
-  detachInterrupt(digitalPinToInterrupt(drdy));
-  
-  g_rampadcidle();
-  digitalWrite(data,LOW);
-  SERIALPORT.println("RAMP_FINISHED");
-}
-
-////////////////////////////
-//// SPECTRUM ANALYZER ////
-///////////////////////////
-
-void spec_ana(InCommand * incommand)
-{
-  int i;
-
-  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
-  {
-    return;
-  }
-  if(incommand->paramcount != 3)
-  {
-    syntax_error();
-    return;
-  }
-  char * channelsADC = incommand->token[1];
-  g_numrampADCchannels = strlen(channelsADC);
-  g_numsteps=atoi(incommand->token[2]);
-
-  g_done = false;  
-  g_firstsamples = true;
-  g_stepcount = 0;
-  g_loopcount = 0;
-  g_numloops = 1; //take only 1 sample at each step
-  g_numwaves = 0; //no arbitrary waves for spec_ana
-  g_numrampDACchannels = 0; //no linear ramp dacs for spec_ana
-
-  // Do some bounds checking
-  if(g_numrampADCchannels > NUMADCCHANNELS)
-  {
-    syntax_error();
-    return;
-  }
-  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
-  //select ADC channels and check range
-  for(i = 0; i < g_numrampADCchannels; i++)
-  {
-    g_ADCchanselect[i] = channelsADC[i] - '0';
-    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
-    {
-      range_error();
-      return;
-    }
-  }
-  g_configurerampADCchannels();
-
-  //Check for SYNC again
-  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
-  {
-    g_rampadcidle();
-    return;
-  }
-  
-  digitalWrite(data,HIGH);
-  
-  send_ack();//send ack and immediately attach interrupt
-
-  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
-
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
-  while(!g_done)
-  {
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)
-      {
-        break;
-      }     
-    }
-  }  
-
-  detachInterrupt(digitalPinToInterrupt(drdy));
-  g_rampadcidle();
-  digitalWrite(data,LOW);
-  SERIALPORT.println("READ_FINISHED");
-}
 
 ////////////////////////////
 //// PID Correction    ////
@@ -2246,6 +2052,399 @@ void check_wave(InCommand *incommand)
   SERIALPORT.println(totalsamples);  
 }
 
+void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of steps>
+{
+  int i;
+    //check for minimum number of parameters
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
+  
+  if(incommand->paramcount < 4)
+  {
+    syntax_error();
+    return;
+  }
+
+  //String channelsDAC = DB[1];
+  //g_numrampDACchannels = channelsDAC.length();
+  char * channelsDAC = incommand->token[1];
+  char * channelsADC = incommand->token[2];
+  g_numrampDACchannels = strlen(channelsDAC);  
+  g_numrampADCchannels = strlen(channelsADC);
+  //check if no DACs selected
+  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
+  {
+    //SERIALPORT.println("NO DACS");
+    g_numrampDACchannels = 0;
+  }
+
+  g_done = false;  
+  g_firstsamples = true;
+  g_stepcount = 0;
+  g_loopcount = 0;
+  g_nextloop = false;
+
+  g_numloops = 1; //take only 1 sample at each step
+  g_numwaves = 0; //no arbitrary waves for int_ramp
+  g_numargramps = 0;//no arbitrary ramps for int_ramp
+  //Do some bounds checking
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (incommand->paramcount != g_numrampDACchannels * 2 + 4))
+  {
+    syntax_error();
+    return;
+  }  
+  //check if no DACs selected
+  if(g_numrampDACchannels != 0)
+  {
+    //define DAC channels and check range
+    for(i = 0; i < g_numrampDACchannels; i++)
+    {
+      g_DACchanselect[i] = channelsDAC[i] - '0';
+      if(g_DACchanselect[i] >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
+      float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
+      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
+      {
+        range_error();
+        return;
+      }
+      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+      g_DACendpoint[i] = voltageToInt32(dacendvoltage);
+    }
+  }
+  //define ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
+  {  
+    g_ADCchanselect[i] = channelsADC[i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+  //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
+
+  g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+3]);
+  #ifdef DEBUGRAMP
+  SERIALPORT.print("numsteps: ");
+  SERIALPORT.println(g_numsteps);
+  #endif  
+  //configure DAC channels
+  g_configurerampDACchannels();
+  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
+  ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
+  ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+
+  g_configurerampADCchannels();
+
+  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
+  
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    g_rampadcidle();
+    return;
+  }
+  digitalWrite(data,HIGH);
+
+  send_ack();//send ack and immediately attach interrupt
+  
+  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
+  //attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
+
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
+  while(!g_done)
+  {
+    if(query_serial(incommand))
+    {
+      if(strcmp("STOP", incommand->token[0]) == 0)      
+      {
+        break;
+      }     
+    }
+  }  
+  detachInterrupt(digitalPinToInterrupt(drdy));
+  
+  g_rampadcidle();
+  digitalWrite(data,LOW);
+  SERIALPORT.println("RAMP_FINISHED");
+}
+
+//INT_ARG_RAMP,<number of arg ramps><dac channels assigned to arg 0>,<dac channels assigned to arg n>,<dac channels>,<adc channels>,
+//<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of samples per setpoint>
+void int_arg_ramp(InCommand *incommand)
+{
+  uint32_t i, j;
+    //check for minimum number of parameters
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
+  
+  if(incommand->paramcount < 6)
+  {
+    syntax_error();
+    return;
+  }
+
+  g_numargramps = atoi(incommand->token[1]); //First parameter
+  if(g_numargramps > ARGMAXRAMPS)
+  {
+    range_error();
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
+    return;
+  }
+  for(i = 0; i < g_numargramps; i++)
+  {
+    char * channelsramp = incommand->token[i + 2];
+    g_argramp[i].numDACchannels = strlen(channelsramp);
+    //g_argramp[i].setpointcount = 0;
+    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    {
+      uint8_t argdac = channelsramp[j] - '0';
+      if(argdac >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      g_argramp[i].DACchanselect[j] = argdac;
+    }
+  }
+#ifdef DEBUGRAMP
+  SERIALPORT.print("Numargramps = ");
+  SERIALPORT.println(g_numargramps);
+  for(i = 0; i < g_numargramps; i++)
+  {
+    SERIALPORT.print("ARG ");
+    SERIALPORT.print(i);
+    SERIALPORT.print(" DAC Channels: ");
+    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    {
+      SERIALPORT.print(g_argramp[i].DACchanselect[j]);
+      SERIALPORT.print(" ");
+    }
+    SERIALPORT.println(" ");
+  }
+#endif  
+  char * channelsDAC = incommand->token[g_numargramps + 2];
+  char * channelsADC = incommand->token[g_numargramps + 3];
+  g_numrampDACchannels = strlen(channelsDAC);  
+  g_numrampADCchannels = strlen(channelsADC);
+  //check if no DACs selected
+  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
+  {
+    //SERIALPORT.println("NO DACS");
+    g_numrampDACchannels = 0;
+  }
+
+  g_done = false;  
+  g_firstsamples = true;
+  g_nextloop = false;
+
+  g_stepcount = 0;
+  g_loopcount = 0;
+ 
+  g_numwaves = 0; //no arbitrary waves for int_ramp
+
+  //Do some bounds checking
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)incommand->paramcount != g_numrampDACchannels * 2 + 5 + g_numargramps))
+  {
+    syntax_error();
+    return;
+  }  
+
+  g_numloops = atoi(incommand->token[g_numrampDACchannels*2+4+g_numargramps]);
+  g_numsteps = 0;
+  for(i = 0; i < g_numargramps; i++)
+  {
+    if(g_argramp[i].numsetpoints > g_numsteps)
+    {
+      g_numsteps = g_argramp[i].numsetpoints;
+    }
+  }
+
+#ifdef DEBUGRAMP
+  SERIALPORT.print("Numloops: ");  
+  SERIALPORT.println(g_numloops);
+  SERIALPORT.print("Numsteps: ");  
+  SERIALPORT.println(g_numsteps);
+#endif
+
+  //check if no DACs selected
+  if(g_numrampDACchannels != 0)
+  {
+    //define DAC channels and check range
+    for(i = 0; i < g_numrampDACchannels; i++)
+    {
+      g_DACchanselect[i] = channelsDAC[i] - '0';
+      if(g_DACchanselect[i] >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      float dacstartvoltage = atof(incommand->token[i+4+g_numargramps])/1000.0;
+      float dacendvoltage = atof(incommand->token[i+4+g_numargramps+g_numrampDACchannels])/1000.0;
+      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
+      {
+        range_error();
+        return;
+      }
+      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+      g_DACendpoint[i] = voltageToInt32(dacendvoltage);
+    }
+  }
+  //define ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
+  {  
+    g_ADCchanselect[i] = channelsADC[i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+  //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
+
+  //configure DAC channels
+  g_configurerampDACchannels();
+  //Set ARG DACs to initial point
+  for(i = 0; i < g_numargramps; i++)
+  {
+    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    {
+      DACintegersend(g_argramp[i].DACchanselect[j], g_argramp[i].setpoint[0]);
+    }
+  }
+  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
+  ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
+  ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+
+  g_configurerampADCchannels();
+
+  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
+  
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    g_rampadcidle();
+    return;
+  }
+  digitalWrite(data,HIGH);
+
+  send_ack();//send ack and immediately attach interrupt
+  
+  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
+  //attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
+
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
+  while(!g_done)
+  {
+    if(query_serial(incommand))
+    {
+      if(strcmp("STOP", incommand->token[0]) == 0)      
+      {
+        break;
+      }     
+    }
+  }  
+  detachInterrupt(digitalPinToInterrupt(drdy));
+  
+  g_rampadcidle();
+  digitalWrite(data,LOW);
+  SERIALPORT.println("RAMP_FINISHED");
+}
+
+////////////////////////////
+//// SPECTRUM ANALYZER ////
+///////////////////////////
+
+void spec_ana(InCommand * incommand)
+{
+  int i;
+
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
+  if(incommand->paramcount != 3)
+  {
+    syntax_error();
+    return;
+  }
+  char * channelsADC = incommand->token[1];
+  g_numrampADCchannels = strlen(channelsADC);
+  g_numsteps=atoi(incommand->token[2]);
+
+  g_done = false;  
+  g_firstsamples = true;
+  g_nextloop = false;
+  g_stepcount = 0;
+  g_loopcount = 0;
+
+  g_numloops = 1; //take only 1 sample at each step
+  g_numwaves = 0; //no arbitrary waves for spec_ana
+  g_numrampDACchannels = 0; //no linear ramp dacs for spec_ana
+  g_numargramps = 0;
+
+  // Do some bounds checking
+  if(g_numrampADCchannels > NUMADCCHANNELS)
+  {
+    syntax_error();
+    return;
+  }
+  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
+  //select ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)
+  {
+    g_ADCchanselect[i] = channelsADC[i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+  g_configurerampADCchannels();
+
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    g_rampadcidle();
+    return;
+  }
+  
+  digitalWrite(data,HIGH);
+  
+  send_ack();//send ack and immediately attach interrupt
+
+  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
+
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
+  while(!g_done)
+  {
+    if(query_serial(incommand))
+    {
+      if(strcmp("STOP", incommand->token[0]) == 0)
+      {
+        break;
+      }     
+    }
+  }  
+
+  detachInterrupt(digitalPinToInterrupt(drdy));
+  g_rampadcidle();
+  digitalWrite(data,LOW);
+  SERIALPORT.println("READ_FINISHED");
+}
 
 //AWG_RAMP,<numwaves>,<dacs waveform 0>,<dacs waveform n>,<dacs to ramp>,<adcs>,<initial dac voltage 1>,<…>,<initial dac voltage n>,
 //<final dac voltage 1>,<…>,<final dac voltage n>,<# of waveform repetitions at each ramp step>,<# of ramp steps>
@@ -2318,24 +2517,22 @@ void awg_ramp(InCommand *incommand)
   }
 
   g_done = false;
+  g_nextloop = false;
   g_firstsamples = true;
   
   //Do some bounds checking
-  //if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)DB.size() != g_numrampDACchannels * 2 + 6 + g_numwaves))
   if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)incommand->paramcount != g_numrampDACchannels * 2 + 6 + g_numwaves))
   {
     syntax_error();
-    //SERIALPORT.println("SYNTAX ERROR");
     return;
   }  
 
   g_loopcount = 0;
   g_stepcount = 0;
-  g_nextloop = false;
-   
-  //g_numloops=(DB[g_numrampDACchannels*2+4+g_numwaves].toInt());
+  g_numargramps = 0;
+
+ 
   g_numloops=atoi(incommand->token[g_numrampDACchannels*2+4+g_numwaves]);
-  //g_numsteps=(DB[g_numrampDACchannels*2+5+g_numwaves].toInt());
   g_numsteps=atoi(incommand->token[g_numrampDACchannels*2+5+g_numwaves]);
 
 #ifdef DEBUGRAMP
@@ -2367,7 +2564,6 @@ void awg_ramp(InCommand *incommand)
       g_DACendpoint[i] = voltageToInt32(dacendvoltage);   
     }
   }
-
   //define ADC channels and check range
   for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
   {  
@@ -2425,6 +2621,238 @@ void awg_ramp(InCommand *incommand)
   digitalWrite(data,LOW);
   SERIALPORT.println("RAMP_FINISHED");
 }
+
+//AWG_ARG_RAMP,<numwaves>,<dacs waveform 0>,<dacs waveform n>,<num arg ramps>,<dacs arg 0>,<dacs arg n>,
+//<dacs to ramp>,<adcs>,<initial dac voltage 1>,<…>,<initial dac voltage n>,
+//<final dac voltage 1>,<…>,<final dac voltage n>,<# of waveform repetitions at each ramp step>
+void awg_arg_ramp(InCommand *incommand)
+{
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0)
+  {
+    return;
+  }
+  //Do some initial bounds checking
+  if(incommand->paramcount < 8)
+  {
+    syntax_error();
+    return;
+  }
+  int i, j;
+  g_numwaves = atoi(incommand->token[1]); //First parameter
+  if(g_numwaves > AWGMAXWAVES)
+  {
+    range_error();
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
+    return;
+  }
+  for(i = 0; i < g_numwaves; i++)
+  {
+    char * channelswave = incommand->token[i + 2];
+    g_awgwave[i].numDACchannels = strlen(channelswave);
+    g_awgwave[i].samplecount = 0;
+    g_awgwave[i].setpointcount = 0;
+    for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    {
+      uint8_t wavedac = channelswave[j] - '0';
+      if(wavedac >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      g_awgwave[i].DACchanselect[j] = wavedac;
+    }
+  }
+
+#ifdef DEBUGRAMP
+  SERIALPORT.print("Numwaves = ");
+  SERIALPORT.println(g_numwaves);
+  for(i = 0; i < g_numwaves; i++)
+  {
+    SERIALPORT.print("Wave ");
+    SERIALPORT.print(i);
+    SERIALPORT.print(" DAC Channels: ");
+    for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    {
+      SERIALPORT.print(g_awgwave[i].DACchanselect[j]);
+      SERIALPORT.print(" ");
+    }
+    SERIALPORT.println(" ");
+  }
+#endif
+  g_numargramps = atoi(incommand->token[g_numwaves + 2]); //Number of arg ramps
+  if(g_numargramps > ARGMAXRAMPS)
+  {
+    range_error();
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
+    return;
+  }
+  for(i = 0; i < g_numargramps; i++)
+  {
+    char * channelsramp = incommand->token[i + g_numwaves + 2];
+    g_argramp[i].numDACchannels = strlen(channelsramp);
+    //g_argramp[i].setpointcount = 0;
+    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    {
+      uint8_t argdac = channelsramp[j] - '0';
+      if(argdac >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      g_argramp[i].DACchanselect[j] = argdac;
+    }
+  }
+#ifdef DEBUGRAMP
+  SERIALPORT.print("Numargramps = ");
+  SERIALPORT.println(g_numargramps);
+  for(i = 0; i < g_numargramps; i++)
+  {
+    SERIALPORT.print("ARG ");
+    SERIALPORT.print(i);
+    SERIALPORT.print(" DAC Channels: ");
+    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    {
+      SERIALPORT.print(g_argramp[i].DACchanselect[j]);
+      SERIALPORT.print(" ");
+    }
+    SERIALPORT.println(" ");
+  }
+#endif  
+
+  char * channelsDAC = incommand->token[g_numwaves + g_numargramps + 3];
+  g_numrampDACchannels = strlen(channelsDAC);
+
+  char * channelsADC = incommand->token[g_numwaves + g_numargramps + 4];
+  g_numrampADCchannels = strlen(channelsADC);
+
+  //check if no DACs selected
+  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
+  {
+    //SERIALPORT.println("NO DACS");
+    g_numrampDACchannels = 0;
+  }
+
+  g_done = false;
+  g_nextloop = false;
+  g_firstsamples = true;
+  
+  //Do some bounds checking
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || ((uint16_t)incommand->paramcount != g_numrampDACchannels * 2 + 6 + g_numwaves + g_numargramps))
+  {
+    syntax_error();
+    return;
+  }  
+
+  g_loopcount = 0;
+  g_stepcount = 0;
+ 
+  g_numloops=atoi(incommand->token[g_numrampDACchannels*2 + 5 + g_numwaves + g_numargramps]);
+  g_numsteps = 0;
+  for(i = 0; i < g_numargramps; i++)
+  {
+    if(g_argramp[i].numsetpoints > g_numsteps)
+    {
+      g_numsteps = g_argramp[i].numsetpoints;
+    }
+  }
+
+#ifdef DEBUGRAMP
+  SERIALPORT.print("Numloops: ");  
+  SERIALPORT.println(g_numloops);
+  SERIALPORT.print("Numsteps: ");  
+  SERIALPORT.println(g_numsteps);
+#endif
+  //check if no DACs selected
+  if(g_numrampDACchannels != 0)
+  {
+    //define DAC channels and check range  
+    for(i = 0; i < g_numrampDACchannels; i++)
+    {
+      g_DACchanselect[i] = channelsDAC[i] - '0';
+      if(g_DACchanselect[i] >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      float dacstartvoltage = atof(incommand->token[i+5+g_numwaves+g_numargramps])/1000.0;
+      float dacendvoltage = atof(incommand->token[i+5+g_numwaves+g_numargramps+g_numrampDACchannels])/1000.0;
+      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
+      {
+        range_error();
+        return;
+      }
+      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+      g_DACendpoint[i] = voltageToInt32(dacendvoltage);   
+    }
+  }
+  //define ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
+  {  
+    g_ADCchanselect[i] = channelsADC[i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+  g_configurerampDACchannels();
+  //Set AWG DACs to initial point
+  for(i = 0; i < g_numwaves; i++)
+  {
+    for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    {
+      DACintegersend(g_awgwave[i].DACchanselect[j], g_awgwave[i].setpoint[0]);
+    }
+  }
+  //Set ARG DACs to initial point
+  for(i = 0; i < g_numargramps; i++)
+  {
+    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    {
+      DACintegersend(g_argramp[i].DACchanselect[j], g_argramp[i].setpoint[0]);
+    }
+  }  
+  
+  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
+  ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
+  ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+  
+  g_configurerampADCchannels();
+  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
+
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    g_rampadcidle();
+    return;
+  }
+  digitalWrite(data,HIGH);
+  
+  send_ack();//send ack and immediately attach interrupt  
+
+  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);
+
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
+
+  while(!g_done)
+  {
+    if(query_serial(incommand))
+    {
+      if(strcmp("STOP", incommand->token[0]) == 0)
+      {
+        break;
+      }     
+    }
+  }  
+  detachInterrupt(digitalPinToInterrupt(drdy));
+  
+  g_rampadcidle();
+  digitalWrite(data,LOW);
+  SERIALPORT.println("RAMP_FINISHED");
+}
+
 
 void awg_ramp_int()//interrupt for AWG ramp
 {
@@ -2503,11 +2931,22 @@ void awg_ramp_int()//interrupt for AWG ramp
           }
           else
           {
-            //get next DAC step ready if this isn't the last sample
+            //get next linear ramp DAC step ready if this isn't the last sample
             for(i = 0; i < g_numrampDACchannels; i++)
             {
               g_DACramppoint[i] += g_DACstep[i];
               DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));
+            }
+            //get next arbitrary ramp DAC step ready
+            for(i = 0; i < g_numargramps; i++)
+            {
+              if(g_stepcount < g_argramp[i].numsetpoints)
+              {
+                for(j = 0; j < g_argramp[i].numDACchannels; j++)
+                {
+                  DACintegersend(g_argramp[i].DACchanselect[j], g_argramp[i].setpoint[g_stepcount]);
+                }
+              }
             }
           }                  
         }
@@ -2598,7 +3037,6 @@ void add_ramp(InCommand *incommand)
     syntax_error();
     return;
   }
-  //uint8_t wavenumber = DB[1].toInt();
   uint8_t rampnumber = atoi(incommand->token[1]);
   if(rampnumber >= ARGMAXRAMPS)
   {
@@ -2606,7 +3044,6 @@ void add_ramp(InCommand *incommand)
     SERIALPORT.println(ARGMAXRAMPS);
     return;
   }
-  //uint32_t numsetpoints = (DB.size() - 2) / 2;
   uint32_t numsetpoints = (incommand->paramcount - 2);
   
   if((numsetpoints + g_argramp[rampnumber].numsetpoints) > ARGMAXSETPOINTS)
@@ -2615,7 +3052,7 @@ void add_ramp(InCommand *incommand)
     SERIALPORT.println(ARGMAXSETPOINTS);
     return;
   }
-  //check for voltage and setpoint range errors before adding the wave
+  //check for voltage and setpoint range errors before adding the ramp
   for(uint32_t i = 0; i < numsetpoints; i++)
   {
     float setvolt = atof(incommand->token[i + 2]) / 1000.0;
