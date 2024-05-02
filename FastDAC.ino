@@ -25,6 +25,8 @@
 #include "FastDACeeprom.h"
 
 #define SENDACK //Comment this to stop sending ACKs for every command
+
+//~2kB of RAM free with ringbuffer increased to 1024
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
 
@@ -33,12 +35,12 @@
 
 #define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
 
-#define COMMANDBUFFERSIZE 1024 //Buffer for incoming command
-#define MAXPARAMS 50 //maximum number of parameters to be parsed in a single command
+#define COMMANDBUFFERSIZE 1025 //Buffer for incoming command
+#define MAXPARAMS 300 //maximum number of parameters to be parsed in a single command
 
 #define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
-#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
+//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
 
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
@@ -74,7 +76,6 @@ const int led = 28;
 const int data=30;//Used for trouble shooting; connect an LED between pin 28 and GND
 const int err=35;
 const int testpin = 11;
-
 
 float g_dac_full_scale = 10.0;
 float g_dac_bit_res = g_dac_full_scale / 32768.0;
@@ -118,6 +119,9 @@ typedef struct AWGwave
 
 AWGwave g_awgwave[AWGMAXWAVES];
 
+volatile uint8_t g_numwaves;
+volatile uint8_t g_numargramps;
+
 typedef struct ARGramp
 {
   int16_t setpoint[ARGMAXSETPOINTS];
@@ -129,8 +133,6 @@ typedef struct ARGramp
 
 ARGramp g_argramp[ARGMAXRAMPS];
 
-volatile uint8_t g_numwaves;
-volatile uint8_t g_numargramps;
 
 volatile uint32_t g_numloops;
 volatile uint32_t g_loopcount;
@@ -284,6 +286,11 @@ bool query_serial(InCommand *incommand)
       //SERIALPORT.println(token);
       incommand->token[count] = token;
       count++;
+      if(count >= MAXPARAMS)
+      {
+        SERIALPORT.println("ERROR_MAX_COMMAND_PARAMS");
+        break;
+      }
       token = strtok(NULL, ",");
     }    
     incommand->paramcount = count;
@@ -525,7 +532,7 @@ void router(InCommand *incommand)
   {
     SERIALPORT.println("NOP");
   }
-  //digitalWrite(testpin, LOW);
+  digitalWrite(testpin, LOW);
 	//SERIALPORT.print(F("Free RAM = "));
   //SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
 }
@@ -725,13 +732,24 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
     return;
   }
   // Calc ramprate, make vector string, pass to autoRamp1
-  int nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
+  uint32_t nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
   if (nSteps < 5)
   {
     nSteps = 5;
   }
+#ifdef DEBUGRAMP  
+  SERIALPORT.print("initial: ");
+  SERIALPORT.println(initial);
+
+  SERIALPORT.print("setpoint: ");
+  SERIALPORT.println(setpoint);  
+  
+  SERIALPORT.print("nsteps: ");
+  SERIALPORT.println(nSteps);
+#endif
   autoRamp1(initial, setpoint, nSteps, dacChannel, 1000, incommand);
   SERIALPORT.println("RAMP_FINISHED");
+
   return;
 }
 
@@ -1667,6 +1685,18 @@ void resetADC()
 void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period, InCommand *incommand)
 // voltage in mV
 {
+  
+  #ifdef DEBUGRAMP  
+  SERIALPORT.print("v1: ");
+  SERIALPORT.println(v1);
+
+  SERIALPORT.print("v2: ");
+  SERIALPORT.println(v2);  
+  
+  SERIALPORT.print("nsteps: ");
+  SERIALPORT.println(nSteps);
+#endif
+  
   digitalWrite(data,HIGH);
   uint32_t timer = micros();
   uint32_t j = 0;
@@ -1677,7 +1707,17 @@ void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t
     if((nowmicros - timer) > period)//Time to take another step
     {
       timer = nowmicros;
-      writeDAC(dacChannel, v1+(v2-v1)*j/(nSteps-1), true); // takes mV
+      float setpoint = (v1+(v2-v1)*j/(nSteps-1));
+      //make sure within range
+      if(setpoint > g_dac_full_scale * 1000.0)
+      {
+        setpoint = g_dac_full_scale * 1000.0;
+      }
+      else if(setpoint < g_dac_full_scale * -1000.0)
+      {
+        setpoint = g_dac_full_scale * -1000.0;
+      }
+      writeDAC(dacChannel, setpoint, true); // takes mV
       //SERIALPORT.println(v1+(v2-v1)*j/(nSteps-1));
       j++;
     }
