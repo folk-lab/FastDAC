@@ -13,5 +13,5 @@ C:\Users\\{username}\AppData\Local\Arduino15\packages\arduino\hardware\sam\1.6.1
 
 If you have both, best to overwrite them both.
 
-Other Librarby Dependencies:
+Other Library Dependencies:
 `SparkFun External EEPROM Arduino Libary` Version 3.2.5
