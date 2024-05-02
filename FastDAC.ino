@@ -3068,8 +3068,8 @@ void g_rampadcidle(void)
 //////////////////////
 /// Arbitrary RAMP ///
 //////////////////////
-//ADD_WAVE,<wave number, 0 indexed)>,<Setpoint 0 in mV>,<Number of samples at setpoint 0>,….<Setpoint n in mV>,<Number of samples at Setpoint n>
-//Maximum ~20 Setpoints per call, due to possible serial buffer overrun
+//ADD_RAMP,<ramp number, 0 indexed)>,<Setpoint 0 in mV>,….<Setpoint n in mV>
+//Maximum ~1024 chars per call, due to possible serial buffer overrun
 void add_ramp(InCommand *incommand)
 {
   if(incommand->paramcount < 3)

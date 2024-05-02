@@ -12,3 +12,6 @@ The other possible location depending on IDE version seems to be:
 C:\Users\\{username}\AppData\Local\Arduino15\packages\arduino\hardware\sam\1.6.12\cores\arduino
 
 If you have both, best to overwrite them both.
+
+Other Librarby Dependencies:
+`SparkFun External EEPROM Arduino Libary` Version 3.2.5

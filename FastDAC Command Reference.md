@@ -445,7 +445,7 @@ The FastDAC has an arbitrary waveform mode where a sequence of DAC setpoints can
 
 ## ADD_WAVE
 
-`ADD_WAVE` is used to configure the arbitrary DAC setpoints. For each setpoint the number of ADC samples to take is also specified (max 2^32-1). The function can be called multiple times until up to 100 setpoints have been stored, and should be sent in groups of 20 setpoints or less to avoid a possible serial buffer overflow.
+`ADD_WAVE` is used to configure the arbitrary DAC setpoints. For each setpoint the number of ADC samples to take is also specified (max 2^32-1). The function can be called multiple times until up to 100 setpoints have been stored, and should be sent in groups of 1024 characters or less to avoid a possible serial buffer overflow.
 
 Syntax:  
 `ADD_WAVE,{wave number (0 or 1)},{Setpoint 0 in mV},{Number of ADC samples to take at setpoint 0},{...},{Setpoint n in mV},{Number of samples to take at Setpoint n}`
@@ -498,6 +498,83 @@ Example (Use 1 waveform, assign DAC 7 to waveform 0, Ramp DACs 1 and 3, Sample A
 
 Returns:  
 `{# of steps * number of samples in wave * number of repetitions * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
+
+# ARG (Arbitrary Ramp Generator) FUNCTIONS
+
+The FastDAC has an arbitrary ramp mode where a sequence of DAC setpoints can be assigned to 4 separate ramp arrays. Up to 10000 setpoints can be configured for each ramp. When an `INT_ARG_RAMP` sequence is started, the ramp with the largest number of samples decides the `NUMBER OF STEPS` compared to a regular `INT_RAMP`. The `NUMBER OF SAMPLES PER STEP` is specified and the `ARG` DAC channels will take a step at the same time as the linear-ramp DAC channels.
+
+## ADD_RAMP
+
+`ADD_RAMP` is used to configure the arbitrary ramp DAC setpoints. The function can be called multiple times until up to 10000 setpoints have been stored, and should be sent in groups of 1024 characters or less to avoid a possible serial buffer overflow.
+
+Syntax:  
+`ADD_RAMP,{ramp number (0-3)},{Setpoint 0 in mV},{...},{Setpoint n in mV}`
+
+Example (setting 8 setpoints to ramp 0):  
+`ADD_RAMP,0,100.0,50.5,500.0,250.2,-200.0,100.0,-50.0,250.3`
+
+Returns:  
+`RAMP,0,8`
+
+## CHECK_RAMP
+
+`CHECK_RAMP` returns how many setpoints have been configured for the specified ramp number (0-3).
+
+Syntax:  
+`CHECK_RAMP,{ramp number}`
+
+Example (for ramp in example above):  
+`CHECK_RAMP,0`
+
+Returns:  
+`RAMP,0,8`
+
+## CLR_RAMP
+
+`CLR_RAMP` resets the number of configured setpoints for a specified ramp back to 0
+
+Syntax:  
+`CLR_RAMP,{ramp number}`
+
+Example:  
+`CLR_RAMP,1`
+
+Returns:  
+`RAMP,1,0`
+
+## INT_ARG_RAMP
+
+Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, but no longer specify the `number of steps` as this is decided by the longest selected ARG ramp. Additionally, you select the number of independent ARG ramps (currently max 4), The DAC channels assigned to each ARG ramp, and the number of samples to take at each ramp step. If the ARG ramps are different lengths, the shorter ARG ramps will stay at their final setpoint until the longest ARG ramp completes.
+
+A ramp can be stopped at any time by sending the command `STOP`.
+
+The `{DACs to ramp}` parameter can be specified as `N` if no DAC channels should linear-ramp
+
+Syntax:  
+`INT_ARG_RAMP,{number of independent ARG ramps},{DAC channels assigned to ARG 0},{...},{DAC channels assigned to ARG N},{DACs to linear-ramp},{ADCs to sample},{Initial linear DAC voltage 1},{...},{Initial linear DAC voltage N},{Final linear DAC voltage 1},{...},{Final linear DAC voltage N},{# of samples at each ramp step}`
+
+Example (Use 1 ARG ramp, assign DACs 0,1,2,3 to ARG 0, linear-ramp DAC 4, Sample ADC 0, Start DAC 4 at -5V, Finish DAC 4 at 5V, Take 10 samples at each ramp step):  
+`INT_ARG_RAMP,1,0123,4,0,-5000,5000,10`
+
+Returns:  
+`{number of setpoints in ARG 0 * number of samples to take * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
+
+## AWG_ARG_RAMP
+
+Similar to `AWG_RAMP` you specify which ADC channels, linear-ramp DAC channels, the number of independent AWG waveforms (currently max 2), The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. Additionally, the number of independent ARB ramps (max 4) is also selected, and the DAC channels assigned to each ARB ramp. Unlike `AWG_RAMP`, the `# of ramp steps` parameter is determined by the length of the longest ARB ramp selected.
+
+A ramp can be stopped at any time by sending the command `STOP`.
+
+The `{DACs to ramp}` parameter can be specified as `N` if no linear-DAC channels should ramp
+
+Syntax:  
+`AWG_ARG_RAMP,{number of independent waveforms},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{number of independent ARG ramps},{DAC channels assigned to ARG 0},{...},{DAC channels assigned to ARG N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step}`
+
+Example (Use 1 AWG waveform, assign DAC 7 to waveform 0, use one ARB ramp, assign DAC 2 to ARB 0, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step):  
+`AWG_RAMP,1,7,1,2,13,0,-5000,-2500,5000,2500,10`
+
+Returns:  
+`{# setpoints in ARG ramp * number of samples in wave * number of repetitions * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
 
 # PID FUNCTIONS
 
