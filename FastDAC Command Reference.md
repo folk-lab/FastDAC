@@ -570,8 +570,8 @@ The `{DACs to ramp}` parameter can be specified as `N` if no linear-DAC channels
 Syntax:  
 `AWG_ARG_RAMP,{number of independent waveforms},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{number of independent ARG ramps},{DAC channels assigned to ARG 0},{...},{DAC channels assigned to ARG N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step}`
 
-Example (Use 1 AWG waveform, assign DAC 7 to waveform 0, use one ARB ramp, assign DAC 2 to ARB 0, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step):  
-`AWG_RAMP,1,7,1,2,13,0,-5000,-2500,5000,2500,10`
+Example (Use 1 AWG waveform, assign DAC 7 to waveform 0, use one ARG ramp, assign DAC 2 to ARG 0, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step):  
+`AWG_ARG_RAMP,1,7,1,2,13,0,-5000,-2500,5000,2500,10`
 
 Returns:  
 `{# setpoints in ARG ramp * number of samples in wave * number of repetitions * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
