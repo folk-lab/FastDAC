@@ -4,7 +4,7 @@
 #define OPTICAL //Comment this if still using old USB version
 
 #ifdef OPTICAL
-#define SERIALPORT Serial1
+#define SERIALPORT Serial2
 #else
 #define SERIALPORT SerialUSB
 #endif
