@@ -21,7 +21,7 @@
 #include "src/PID/PID_v1.h" // Our own 'fork' of https://github.com/br3ttb/Arduino-PID-Library/
 //#include <vector>
 #include "FastDACdefs.h"
-#include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
+#include "FastDACcalibration.h" //cals are now stored in EEPROM
 #include "FastDACeeprom.h"
 
 #define SENDACK //Comment this to stop sending ACKs for every command
