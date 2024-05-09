@@ -20,12 +20,18 @@
 #include "src/PID/PID_v1.h" // Our own 'fork' of https://github.com/br3ttb/Arduino-PID-Library/
 //#include <vector>
 #include "FastDACdefs.h"
-#include "FastDACcalibration.h" //This cal file should be copied and renamed for each DAQ unit, maybe store in EEPROM in the future
+#include "FastDACcalibration.h" 
 #include "FastDACeeprom.h"
+#include "mbed.h"
+#include "rtos.h"
+//#include "mbed/events/include/events/mbed_events.h"
+
+
+//using namespace mbed;
+//using namespace rtos;
 
 #define SENDACK //Comment this to stop sending ACKs for every command
 
-//~2kB of RAM free with ringbuffer increased to 1024
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
 
@@ -47,8 +53,6 @@
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART, try to stay as integer divisor of 84MHz mclk
 
 
-typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
-MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
 bool g_clock_synced = false;
 
 const int slave_master = 23; //low for master, high for slave
@@ -60,8 +64,9 @@ const int adc_trig_out = 50; //active-low ADC trigger output, starts the samplin
 const int adc_trig_in = 49; //active-low ADC trigger input, for diagnostics
 
 
-SPISettings adcspi(10500000, MSBFIRST, SPI_MODE3);
-SPISettings dacspi(21000000, MSBFIRST, SPI_MODE1);
+//SPISettings adcspi(10500000, MSBFIRST, SPI_MODE3);
+SPISettings adcspi(5000000, MSBFIRST, SPI_MODE3); //5MHz gives 3.75MHz, Due settings: 10.5MHz gives
+SPISettings dacspi(20000000, MSBFIRST, SPI_MODE1); //20 gives 15MHz
 const int adc=52; //The SPI pin for the ADC
 const int dac0 = 4; //The SPI pin for the DAC0
 const int dac1 = 10; //The SPI pin for the DAC1
@@ -139,6 +144,7 @@ volatile uint32_t g_numloops;
 volatile uint32_t g_loopcount;
 
 volatile bool g_nextloop = false;
+volatile bool g_sampleflag = false;
 
 //PID Specific
 typedef struct PIDparam
@@ -166,6 +172,13 @@ PIDparam g_pidparam[MAXNUMPIDS];
 
 PID pid0(&(g_pidparam[0].adcin), &(g_pidparam[0].dacout), &(g_pidparam[0].setpoint), g_pidparam[0].kp, g_pidparam[0].ki, g_pidparam[0].kd, DIRECT);
 
+mbed::InterruptIn drdy_int(digitalPinToPinName(drdy));
+
+//events::EventQueue queue(32 * EVENTS_EVENT_SIZE);
+//rtos::Thread t;
+
+typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
+MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
 
 void setup()
 {    
@@ -193,7 +206,7 @@ void setup()
 
   //pinMode(spi,OUTPUT);
   pinMode(reset, OUTPUT);
-  pinMode(drdy, INPUT);  //Data ready pin for the ADC.
+  //pinMode(drdy, INPUT);  //Data ready pin for the ADC.
   pinMode(led, OUTPUT);  //Used for blinking indicator LED
   digitalWrite(led, HIGH);
   pinMode(data, OUTPUT);
@@ -220,10 +233,16 @@ void setup()
     g_DACsetpoint[i] = 0;
   }
   loadadccals();
+  //Set the event queue thread priority and start the event queue
 
-  attachInterrupt(digitalPinToInterrupt(drdy), intset, FALLING);//Interrupt has to be attached once for the priority to stick
+  //t.start(callback(&queue, &events::EventQueue::dispatch_forever));
+  //t.set_priority(osPriorityISR);
+  drdy_int.fall(&ramp_int);
+  drdy_int.fall(NULL);
+  //SPI.usingInterrupt(digitalPinToInterrupt(drdy));
+  //attachInterrupt(digitalPinToInterrupt(drdy), intset, FALLING);//Interrupt has to be attached once for the priority to stick
   //NVIC_SetPriority(PIOC_IRQn, 1); //Make ADC interrupt priority lower than UART
-  detachInterrupt(digitalPinToInterrupt(drdy));
+  //detachInterrupt(digitalPinToInterrupt(drdy));
 
 }
 void intset(void)
@@ -310,7 +329,6 @@ void loop()
   {
     router(&incommand);    
   }
-     
 }
 
 void router(InCommand *incommand)
@@ -1514,7 +1532,7 @@ void writeDACoffset(int ch, int8_t steps)
   SPI.transfer(steps);
   digitalWrite(thisdac,HIGH);
   SPI.endTransaction(); 
-
+  delayMicroseconds(2);
   digitalWrite(thisldac, LOW);
   digitalWrite(thisldac, HIGH);
 }
@@ -1533,7 +1551,7 @@ void writeDACgain(int ch, int8_t steps)
   SPI.transfer(steps);
   digitalWrite(thisdac,HIGH);
   SPI.endTransaction(); 
-
+  delayMicroseconds(2);
   digitalWrite(thisldac, LOW);
   digitalWrite(thisldac, HIGH);
 }
@@ -1600,7 +1618,10 @@ void rdy()
 void waitDRDY()
 // wait for DRDY
 {
-  while (digitalRead(drdy)==HIGH){}
+  //while (digitalRead(drdy)==HIGH){}
+  while(drdy_int.read() == 1)
+  {    
+  }
 }
 
 void debug()
@@ -1813,6 +1834,7 @@ float writeDAC(uint8_t dacChannel, float voltage, bool load)
   actualvoltage = dacDataSend(dacChannel, voltage);
   if(load)//load both DACs if necessary
   {
+    delayMicroseconds(2);
     digitalWrite(ldac0, LOW);
     digitalWrite(ldac1, LOW);
     digitalWrite(ldac0, HIGH);
@@ -2167,135 +2189,7 @@ void check_wave(InCommand *incommand)
   SERIALPORT.println(totalsamples);  
 }
 
-void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of steps>
-{
-  int i;
-    //check for minimum number of parameters
-  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
-  {
-    return;
-  }
-  
-  if(incommand->paramcount < 4)
-  {
-    syntax_error();
-    return;
-  }
 
-  //String channelsDAC = DB[1];
-  //g_numrampDACchannels = channelsDAC.length();
-  char * channelsDAC = incommand->token[1];
-  char * channelsADC = incommand->token[2];
-  g_numrampDACchannels = strlen(channelsDAC);  
-  g_numrampADCchannels = strlen(channelsADC);
-  //check if no DACs selected
-  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
-  {
-    //SERIALPORT.println("NO DACS");
-    g_numrampDACchannels = 0;
-  }
-
-  g_done = false;  
-  g_firstsamples = true;
-  g_stepcount = 0;
-  g_loopcount = 0;
-  g_nextloop = false;
-
-  g_numloops = 1; //take only 1 sample at each step
-  g_numwaves = 0; //no arbitrary waves for int_ramp
-  g_numargramps = 0;//no arbitrary ramps for int_ramp
-  //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (incommand->paramcount != g_numrampDACchannels * 2 + 4))
-  {
-    syntax_error();
-    return;
-  }  
-  //check if no DACs selected
-  if(g_numrampDACchannels != 0)
-  {
-    //define DAC channels and check range
-    for(i = 0; i < g_numrampDACchannels; i++)
-    {
-      g_DACchanselect[i] = channelsDAC[i] - '0';
-      if(g_DACchanselect[i] >= NUMDACCHANNELS)
-      {
-        range_error();
-        return;
-      }
-      float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
-      float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
-      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
-      {
-        range_error();
-        return;
-      }
-      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
-      g_DACendpoint[i] = voltageToInt32(dacendvoltage);
-    }
-  }
-  //define ADC channels and check range
-  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
-  {  
-    g_ADCchanselect[i] = channelsADC[i] - '0';
-    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
-    {
-      range_error();
-      return;
-    }
-  }
-  //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
-
-  g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+3]);
-  #ifdef DEBUGRAMP
-  SERIALPORT.print("numsteps: ");
-  SERIALPORT.println(g_numsteps);
-  #endif  
-  //configure DAC channels
-  g_configurerampDACchannels();
-  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
-  digitalWrite(ldac0, LOW);
-  digitalWrite(ldac1, LOW);
-  digitalWrite(ldac0, HIGH);
-  digitalWrite(ldac1, HIGH);
-  //Need to check if this is still necessary
-  //ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
-  //ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-
-  g_configurerampADCchannels();
-
-  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
-  
-  //Check for SYNC again
-  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
-  {
-    g_rampadcidle();
-    return;
-  }
-  digitalWrite(data,HIGH);
-
-  send_ack();//send ack and immediately attach interrupt
-  
-  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
-  //attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
-
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
-  while(!g_done)
-  {
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)      
-      {
-        break;
-      }     
-    }
-  }  
-  detachInterrupt(digitalPinToInterrupt(drdy));
-  
-  g_rampadcidle();
-  digitalWrite(data,LOW);
-  SERIALPORT.println("RAMP_FINISHED");
-}
 
 //INT_ARG_RAMP,<number of arg ramps><dac channels assigned to arg 0>,<dac channels assigned to arg n>,<dac channels>,<adc channels>,
 //<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of samples per setpoint>
@@ -2465,7 +2359,7 @@ void int_arg_ramp(InCommand *incommand)
 
   send_ack();//send ack and immediately attach interrupt
   
-  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
+  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);  
   //attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
@@ -2549,7 +2443,7 @@ void spec_ana(InCommand * incommand)
   
   send_ack();//send ack and immediately attach interrupt
 
-  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);  
+  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
@@ -2729,7 +2623,7 @@ void awg_ramp(InCommand *incommand)
   
   send_ack();//send ack and immediately attach interrupt  
 
-  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);
+  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
 
@@ -2964,7 +2858,7 @@ void awg_arg_ramp(InCommand *incommand)
   
   send_ack();//send ack and immediately attach interrupt  
 
-  attachInterrupt(digitalPinToInterrupt(drdy), awg_ramp_int, FALLING);
+  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
 
@@ -2985,19 +2879,160 @@ void awg_arg_ramp(InCommand *incommand)
   SERIALPORT.println("RAMP_FINISHED");
 }
 
+void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of steps>
+{
+  int i;
+    //check for minimum number of parameters
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    return;
+  }
+  
+  if(incommand->paramcount < 4)
+  {
+    syntax_error();
+    return;
+  }
 
-void awg_ramp_int()//interrupt for AWG ramp
+  //String channelsDAC = DB[1];
+  //g_numrampDACchannels = channelsDAC.length();
+  char * channelsDAC = incommand->token[1];
+  char * channelsADC = incommand->token[2];
+  g_numrampDACchannels = strlen(channelsDAC);  
+  g_numrampADCchannels = strlen(channelsADC);
+  //check if no DACs selected
+  if((g_numrampDACchannels == 1) && (channelsDAC[0] == 'N'))
+  {
+    //SERIALPORT.println("NO DACS");
+    g_numrampDACchannels = 0;
+  }
+
+  g_done = false;  
+  g_firstsamples = true;
+  g_stepcount = 0;
+  g_loopcount = 0;
+  g_nextloop = false;
+
+  g_numloops = 1; //take only 1 sample at each step
+  g_numwaves = 0; //no arbitrary waves for int_ramp
+  g_numargramps = 0;//no arbitrary ramps for int_ramp
+  //Do some bounds checking
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (incommand->paramcount != g_numrampDACchannels * 2 + 4))
+  {
+    syntax_error();
+    return;
+  }  
+  //check if no DACs selected
+  if(g_numrampDACchannels != 0)
+  {
+    //define DAC channels and check range
+    for(i = 0; i < g_numrampDACchannels; i++)
+    {
+      g_DACchanselect[i] = channelsDAC[i] - '0';
+      if(g_DACchanselect[i] >= NUMDACCHANNELS)
+      {
+        range_error();
+        return;
+      }
+      float dacstartvoltage = atof(incommand->token[i+3])/1000.0;
+      float dacendvoltage = atof(incommand->token[i+3+g_numrampDACchannels])/1000.0;
+      if((abs(dacstartvoltage) > g_dac_full_scale) || (abs(dacendvoltage) > g_dac_full_scale))
+      {
+        range_error();
+        return;
+      }
+      g_DACstartpoint[i] = voltageToInt32(dacstartvoltage);
+      g_DACendpoint[i] = voltageToInt32(dacendvoltage);
+    }
+  }
+  //define ADC channels and check range
+  for(i = 0; i < g_numrampADCchannels; i++)//Configure ADC channels
+  {  
+    g_ADCchanselect[i] = channelsADC[i] - '0';
+    if(g_ADCchanselect[i] >= NUMADCCHANNELS)
+    {
+      range_error();
+      return;
+    }
+  }
+  //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
+
+  g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+3]);
+  #ifdef DEBUGRAMP
+  SERIALPORT.print("numsteps: ");
+  SERIALPORT.println(g_numsteps);
+  #endif  
+  //configure DAC channels
+  g_configurerampDACchannels();
+  delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
+  digitalWrite(ldac0, LOW);
+  digitalWrite(ldac1, LOW);
+  digitalWrite(ldac0, HIGH);
+  digitalWrite(ldac1, HIGH);
+  //Need to check if this is still necessary
+  //ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
+  //ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+
+  g_configurerampADCchannels();
+
+  delayMicroseconds(DACSETTLEMICROS); // wait for DACs to settle
+  
+  //Check for SYNC again
+  if(sync_check(CHECK_CLOCK | CHECK_SYNC) != 0) //make sure ADC has a clock and sync armed if not indep mode
+  {
+    g_rampadcidle();
+    return;
+  }
+  digitalWrite(data,HIGH);
+
+  send_ack();//send ack and immediately attach interrupt
+  g_sampleflag = false;
+  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
+  drdy_int.fall(&ramp_int);  
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
+  while(!g_done)
+  {
+    
+    if(query_serial(incommand))
+    {
+      if(strcmp("STOP", incommand->token[0]) == 0)      
+      {
+        break;
+      }     
+    }
+    //rtos::ThisThread::sleep_for(10);
+    
+    if(g_sampleflag)
+    {
+      ramp_event();
+    }
+  }  
+  //detachInterrupt(digitalPinToInterrupt(drdy));
+  drdy_int.fall(NULL);
+  
+  g_rampadcidle();
+  digitalWrite(data,LOW);
+  SERIALPORT.println("RAMP_FINISHED");
+}
+
+void ramp_int(void)//interrupt for ramp, called when ADC samples are ready
+{
+  digitalWrite(ldac0, LOW);
+  digitalWrite(ldac1, LOW);  
+  digitalWrite(ldac0, HIGH);
+  digitalWrite(ldac1, HIGH);
+  g_sampleflag = true;  
+  //queue.call(ramp_event);
+  drdy_int.fall(NULL);//disable interrupt temporarily to prevent re-entering immediately
+}
+
+void ramp_event(void)//event for ramp
 {
    uint32_t i, j;
+   //detachInterrupt(digitalPinToInterrupt(drdy));// temporarily detach interrupt    
    if(!g_done)
    {
-      digitalWrite(ldac0, LOW);
-      digitalWrite(ldac1, LOW);
-      digitalWrite(ldac0, HIGH);
-      digitalWrite(ldac1, HIGH);
-      //ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
-      //ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
-
       if(g_firstsamples)
       {
         for(i = 0; i < g_numrampADCchannels; i++) //discard first loop
@@ -3009,7 +3044,7 @@ void awg_ramp_int()//interrupt for AWG ramp
           SPI.transfer(0); // Read/write second byte
           digitalWrite(adc, HIGH);
           SPI.endTransaction();
-          g_firstsamples = false;           
+          g_firstsamples = false;          
         }        
       }
       else
@@ -3022,7 +3057,7 @@ void awg_ramp_int()//interrupt for AWG ramp
           SERIALPORT.write(SPI.transfer(0)); // Read/write first byte
           SERIALPORT.write(SPI.transfer(0)); // Read/write second byte
           digitalWrite(adc, HIGH);
-          SPI.endTransaction();
+          SPI.endTransaction();      
         }
       }
       if(g_numwaves == 0)
@@ -3072,10 +3107,10 @@ void awg_ramp_int()//interrupt for AWG ramp
               SERIALPORT.write(SPI.transfer(0)); // Read/write first byte
               SERIALPORT.write(SPI.transfer(0)); // Read/write second byte
               digitalWrite(adc, HIGH);
-              SPI.endTransaction();
+              SPI.endTransaction();              
             }
-            
-            detachInterrupt(digitalPinToInterrupt(drdy));            
+            drdy_int.fall(NULL);
+            //detachInterrupt(digitalPinToInterrupt(drdy));            
           }
           else
           {
@@ -3099,6 +3134,9 @@ void awg_ramp_int()//interrupt for AWG ramp
           }                  
         }
       }
+   //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING); //reattach if not done
+   drdy_int.fall(&ramp_int);
+   g_sampleflag = false;
    }
 }
 
