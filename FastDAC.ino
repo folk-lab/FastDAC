@@ -16,7 +16,7 @@
 ///////////////
 
 
-#include <SPI.h>
+//#include <SPI.h>
 #include "src/PID/PID_v1.h" // Our own 'fork' of https://github.com/br3ttb/Arduino-PID-Library/
 //#include <vector>
 #include "FastDACdefs.h"
@@ -25,7 +25,7 @@
 #include "mbed.h"
 #include "rtos.h"
 //#include "mbed/events/include/events/mbed_events.h"
-
+#include "SDRAM.h"
 
 //using namespace mbed;
 //using namespace rtos;
@@ -62,11 +62,12 @@ const int clock_led = 34; //on board clock ok led output
 const int ext_clock_led = 32; //external clock ok led output
 const int adc_trig_out = 50; //active-low ADC trigger output, starts the sampling
 const int adc_trig_in = 49; //active-low ADC trigger input, for diagnostics
+const int mosi = 90;
+const int miso = 89;
+const int sck = 91;
 
 
-//SPISettings adcspi(10500000, MSBFIRST, SPI_MODE3);
-SPISettings adcspi(5000000, MSBFIRST, SPI_MODE3); //5MHz gives 3.75MHz, Due settings: 10.5MHz gives
-SPISettings dacspi(20000000, MSBFIRST, SPI_MODE1); //20 gives 15MHz
+
 const int adc=52; //The SPI pin for the ADC
 const int dac0 = 4; //The SPI pin for the DAC0
 const int dac1 = 10; //The SPI pin for the DAC1
@@ -137,7 +138,7 @@ typedef struct ARGramp
   //uint32_t setpointcount;
 }ARGramp;
 
-ARGramp g_argramp[ARGMAXRAMPS];
+ARGramp *g_argramp[ARGMAXRAMPS];
 
 
 volatile uint32_t g_numloops;
@@ -174,10 +175,13 @@ PID pid0(&(g_pidparam[0].adcin), &(g_pidparam[0].dacout), &(g_pidparam[0].setpoi
 
 mbed::InterruptIn drdy_int(digitalPinToPinName(drdy));
 
-//events::EventQueue queue(32 * EVENTS_EVENT_SIZE);
-//rtos::Thread t;
+mbed::SPI adspi(digitalPinToPinName(mosi), digitalPinToPinName(miso), digitalPinToPinName(sck));
 
+mbed::DigitalOut dac0cs(digitalPinToPinName(dac0));
+mbed::DigitalOut dac1cs(digitalPinToPinName(dac1));
+mbed::DigitalOut adccs(digitalPinToPinName(adc));
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
+typedef enum SPI_select {spiADC, spiDAC} SPI_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
 
 void setup()
@@ -185,6 +189,9 @@ void setup()
   SERIALPORT.begin(BAUDRATE);
 
   g_ms_select = INDEP; //Defaults to independent  
+  dac0cs = 1;
+  dac1cs = 1;
+  adccs = 1;
   pinMode(slave_master, OUTPUT); //low for master, high for slave
   digitalWrite(slave_master, LOW);
   pinMode(adc_trig_out, OUTPUT); //active-high ADC trigger output, starts the sampling
@@ -204,7 +211,6 @@ void setup()
   pinMode(ldac1,OUTPUT);
   digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
 
-  //pinMode(spi,OUTPUT);
   pinMode(reset, OUTPUT);
   //pinMode(drdy, INPUT);  //Data ready pin for the ADC.
   pinMode(led, OUTPUT);  //Used for blinking indicator LED
@@ -219,8 +225,8 @@ void setup()
   digitalWrite(reset,HIGH);
   digitalWrite(data,LOW);
 
-  SPI.begin(); // wake up the SPI bus
-  
+  spi_select(spiDAC);
+  adspi.select();
 	if(initeeprom() != 0)
   {
     SERIALPORT.println("ERROR Initializing EEPROM!");
@@ -233,17 +239,13 @@ void setup()
     g_DACsetpoint[i] = 0;
   }
   loadadccals();
-  //Set the event queue thread priority and start the event queue
-
-  //t.start(callback(&queue, &events::EventQueue::dispatch_forever));
-  //t.set_priority(osPriorityISR);
+  //Add and remove interrupt once to decrease latency
   drdy_int.fall(&ramp_int);
   drdy_int.fall(NULL);
-  //SPI.usingInterrupt(digitalPinToInterrupt(drdy));
-  //attachInterrupt(digitalPinToInterrupt(drdy), intset, FALLING);//Interrupt has to be attached once for the priority to stick
-  //NVIC_SetPriority(PIOC_IRQn, 1); //Make ADC interrupt priority lower than UART
-  //detachInterrupt(digitalPinToInterrupt(drdy));
-
+  SDRAM.begin(SDRAM_START_ADDRESS + sizeof(ARGramp[ARGMAXRAMPS]));
+  g_argramp = (ARGramp*)SDRAM_START_ADDRESS;
+  SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]));
+  SERIALPORT.println(sizeof(g_argramp));
 }
 void intset(void)
 {
@@ -541,6 +543,23 @@ void router(InCommand *incommand)
   //SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
 }
 
+//Selects the correct clock and data format for the SPI, saves previous state to avoid unnecessary switching delays
+void spi_select(SPI_select select)
+{
+  static SPI_select select_saved; //SPI slave selection, sets correct clock and polarity
+  if((select == spiADC) && (select_saved != spiADC))
+  {
+    adspi.format(8, 3);
+    adspi.frequency(5000000); //5MHz gives 3.75MHz, bug
+    select_saved = spiADC;
+  }
+  if((select == spiDAC) && (select_saved != spiDAC))
+  {
+    adspi.format(8, 1); //8 bits, SPI mode 1
+    adspi.frequency(20000000); //20MHz gives 15MHz, bug
+    select_saved = spiDAC;
+  }
+}
 
 ///////////////////
 //// GET/READ ////
@@ -614,12 +633,11 @@ uint8_t readADCfw(uint8_t ch)
   }
   uint8_t fw;
 
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_REGREAD | ADC_CHCONVTIME | ch); //Read conversion time register
-  fw = SPI.transfer(0); //Read back the CT register
-  digitalWrite(adc, HIGH);
-  SPI.endTransaction();
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_REGREAD | ADC_CHCONVTIME | ch); //Read conversion time register
+  fw = adspi.write(0x00); //Read back the CT register
+  adccs = 1;
 
   fw &= 0x7F; //get lowest 7 bits
   return fw;
@@ -701,12 +719,13 @@ void convert_time(InCommand *incommand)
 void writeADCfw(uint8_t ch, uint8_t fw)
 {
   fw |= 0x80; //enable chopping
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHCONVTIME | ch); //Write conversion time register
-  SPI.transfer(fw); //Write 'filter word' (conversion time)
-  digitalWrite(adc, HIGH);
-  SPI.endTransaction();
+  
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHCONVTIME | ch); //Write conversion time register
+  adspi.write(fw); //Write 'filter word' (conversion time)
+  adccs = 1;  
+
 }
 
 //// DAC ////
@@ -801,16 +820,15 @@ void start_pid(InCommand *incommand)
   pid0.SetMode(AUTOMATIC);
   pid0.SetOutputLimits(g_pidparam[0].dacmin, g_pidparam[0].dacmax);
   
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHSETUP | g_pidparam[0].ADCchan);//Access channel setup register
-  SPI.transfer(ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
-  SPI.transfer(ADC_CHMODE | g_pidparam[0].ADCchan);   //Access channel mode register
-  SPI.transfer(ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
-  SPI.transfer(ADC_IO); //Write to ADC IO register
-  SPI.transfer(ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
-  digitalWrite(adc, HIGH);
-  SPI.endTransaction();
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHSETUP | g_pidparam[0].ADCchan);//Access channel setup register
+  adspi.write(ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
+  adspi.write(ADC_CHMODE | g_pidparam[0].ADCchan);   //Access channel mode register
+  adspi.write(ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping
+  adspi.write(ADC_IO); //Write to ADC IO register
+  adspi.write(ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
+  adccs = 1;
   
   attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
 
@@ -821,15 +839,14 @@ void pidint(void)
 {
   uint8_t b1, b2;
   int decimal;
-  
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHDATA | ADC_REGREAD | g_pidparam[0].ADCchan); //Read channel data register
-  b1 = SPI.transfer(0); // Read first byte
-  b2 = SPI.transfer(0); // Read second byte
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();
-  
+
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHDATA | ADC_REGREAD | g_pidparam[0].ADCchan); //Read channel data register
+  b1 = adspi.write(0); // Read first byte
+  b2 = adspi.write(0); // Read second byte
+  adccs = 1;
+
   decimal = twoByteToInt(b1, b2);
   g_pidparam[0].adcin = map2(decimal, 0, 65536, -10000.0, 10000.0);
     
@@ -875,19 +892,18 @@ void stop_pid(InCommand * incommand)
   pid0.SetMode(MANUAL);
   detachInterrupt(digitalPinToInterrupt(drdy));
   
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_IO); //Write to ADC IO register
-  SPI.transfer(ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_IO); //Write to ADC IO register
+  adspi.write(ADC_IO_DEFAULT | ADC_IO_P1DIR); //Change RDY to trigger when any channel complete, set P1 as input
   for(i = 0; i < NUMADCCHANNELS; i++)
   {
-  SPI.transfer(ADC_CHSETUP | i);//Access channel setup register
-  SPI.transfer(ADC_CHSETUP_RNG10BI);//set +/-10V range and disable for continuous mode
-  SPI.transfer(ADC_CHMODE | i);   //Access channel mode register
-  SPI.transfer(ADC_MODE_IDLE);  //Set ADC to idle
+  adspi.write(ADC_CHSETUP | i);//Access channel setup register
+  adspi.write(ADC_CHSETUP_RNG10BI);//set +/-10V range and disable for continuous mode
+  adspi.write(ADC_CHMODE | i);   //Access channel mode register
+  adspi.write(ADC_MODE_IDLE);  //Set ADC to idle
   }
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();
+  adccs = 1;
 
   send_ack();
 }
@@ -1137,15 +1153,16 @@ void adc_zero_sc_cal(InCommand *incommand)
 
 void cal_adc_zero_scale(void)
 {
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW); 
-  SPI.transfer(ADC_CHMODE);   // Access ch mode register in write mode
-  SPI.transfer(ADC_MODE_IDLE);       // Enter idle mode
 
-  SPI.transfer(ADC_CHMODE);   // Access ch mode register in write mode
-  SPI.transfer(ADC_MODE_SELFZEROCAL);       // Enter system zero-scale cal mode
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();  
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHMODE);   // Access ch mode register in write mode
+  adspi.write(ADC_MODE_IDLE);       // Enter idle mode
+
+  adspi.write(ADC_CHMODE);   // Access ch mode register in write mode
+  adspi.write(ADC_MODE_SELFZEROCAL);       // Enter system zero-scale cal mode
+  adccs = 1;
+   
   waitDRDY();
 }
 
@@ -1178,17 +1195,15 @@ void adc_ch_zero_sc_cal(InCommand *incommand)
 
 uint32_t cal_adc_ch_zero_scale(int ch)
 {
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHMODE | ch);   // Access ch mode register in write mode
+  adspi.write(ADC_MODE_IDLE);       // Enter idle mode
 
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHMODE | ch);   // Access ch mode register in write mode
-  SPI.transfer(ADC_MODE_IDLE);       // Enter idle mode
+  adspi.write(ADC_CHMODE | ch);   // Access ch mode register in write mode
+  adspi.write(ADC_MODE_SYSZEROCAL);       // Enter system zero-scale cal mode
+  adccs = 1;
 
-  SPI.transfer(ADC_CHMODE | ch);   // Access ch mode register in write mode
-  SPI.transfer(ADC_MODE_SYSZEROCAL);       // Enter system zero-scale cal mode
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();
-  
   waitDRDY();
   return readADCzerocal(ch);
 }
@@ -1197,24 +1212,19 @@ uint32_t readADCzerocal(byte ch)
 {
   uint8_t b1, b2, b3;
   uint32_t calvalue;
-  //int n;
-  //String buffer;
-  //char buffertemp [100];
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHZEROSCALECAL | ADC_REGREAD | ch);   // Access ch zero-scale cal register in read mode
-  b1 = SPI.transfer(0x00);   // read byte 1
-  b2 = SPI.transfer(0x00);   // read byte 2
-  b3 = SPI.transfer(0x00);   // read byte 3
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();  
+
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHZEROSCALECAL | ADC_REGREAD | ch);   // Access ch zero-scale cal register in read mode
+  b1 = adspi.write(0x00);   // read byte 1
+  b2 = adspi.write(0x00);   // read byte 2
+  b3 = adspi.write(0x00);   // read byte 3
+  adccs = 1;
 
   calvalue = b1 << 16;
   calvalue += b2 << 8;
   calvalue += b3;
 
-  //n = snprintf(buffertemp,100,"ch%d,%d",ch,calvalue);
-  //buffer = buffertemp;
   return calvalue;
 }
 
@@ -1247,15 +1257,16 @@ void adc_ch_full_sc_cal(InCommand *incommand)
 uint32_t cal_adc_ch_full_scale(uint8_t ch)
 {
   //Put ch in idle mode
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHMODE | ch); // Access ch mode register in write mode
-  SPI.transfer(ADC_MODE_IDLE); // Enter idle mode
 
-  SPI.transfer(ADC_CHMODE | ch); // Access ch mode register in write mode
-  SPI.transfer(ADC_MODE_SYSFULLCAL); // Enter system full-scale cal mode
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHMODE | ch); // Access ch mode register in write mode
+  adspi.write(ADC_MODE_IDLE); // Enter idle mode
+
+  adspi.write(ADC_CHMODE | ch); // Access ch mode register in write mode
+  adspi.write(ADC_MODE_SYSFULLCAL); // Enter system full-scale cal mode
+  adccs = 1;
+  
   waitDRDY();
 
   return readADCfullcal(ch);
@@ -1266,14 +1277,13 @@ uint32_t readADCfullcal(uint8_t ch)
   uint8_t b1, b2, b3;
   uint32_t calvalue;
   
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHFULLSCALECAL | ADC_REGREAD | ch);   // Access ch full-scale cal register in read mode
-  b1 = SPI.transfer(0x00);   // read byte 1
-  b2 = SPI.transfer(0x00);   // read byte 2
-  b3 = SPI.transfer(0x00);   // read byte 3
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHFULLSCALECAL | ADC_REGREAD | ch);   // Access ch full-scale cal register in read mode
+  b1 = adspi.write(0x00);   // read byte 1
+  b2 = adspi.write(0x00);   // read byte 2
+  b3 = adspi.write(0x00);   // read byte 3
+  adccs = 1;
 
   calvalue = b1 << 16;
   calvalue += b2 << 8;
@@ -1347,26 +1357,25 @@ void writeADCcal(byte ch, uint32_t zerocal, uint32_t fullcal)
 
 void writeADCchzeroscale(byte ch, int32_t zeroscale)
 {
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);  
-  SPI.transfer(ADC_CHZEROSCALECAL | ch); //Write channel zero scale register
-  SPI.transfer((zeroscale & 0xFF0000) >> 16); // Write first byte
-  SPI.transfer((zeroscale & 0xFF00) >> 8); // Write second byte
-  SPI.transfer(zeroscale & 0xFF); // Write third byte
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();  
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHZEROSCALECAL | ch); //Write channel zero scale register
+  adspi.write((zeroscale & 0xFF0000) >> 16); // Write first byte
+  adspi.write((zeroscale & 0xFF00) >> 8); // Write second byte
+  adspi.write(zeroscale & 0xFF); // Write third byte
+  adccs = 1;
+
 }
 
 void writeADCchfullscale(byte ch, int32_t fullscale)
 {
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_CHFULLSCALECAL | ch); //Write channel zero scale register
-  SPI.transfer((fullscale & 0xFF0000) >> 16); // Write first byte
-  SPI.transfer((fullscale & 0xFF00) >> 8); // Write second byte
-  SPI.transfer(fullscale & 0xFF); // Write third byte
-  digitalWrite(adc,HIGH);
-  SPI.endTransaction();  
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_CHFULLSCALECAL | ch); //Write channel full scale register
+  adspi.write((fullscale & 0xFF0000) >> 16); // Write first byte
+  adspi.write((fullscale & 0xFF00) >> 8); // Write second byte
+  adspi.write(fullscale & 0xFF); // Write third byte
+  adccs = 1;
 }
 
 //// DAC ////
@@ -1519,12 +1528,39 @@ void dac_ch_reset_cal(uint8_t ch)
 
 void writeDACoffset(int ch, int8_t steps)
 {
-  int thisdac;
-  int thisldac;
+  //int thisdac;
+  //int thisldac;
 
 	dacocal[ch] = steps;
+ 
+  if(ch <= 3)
+  {
+    spi_select(spiDAC);
+    dac0cs = 0;
+    adspi.write(DAC_OFFSET | ch);
+    adspi.write(0x00);
+    adspi.write(steps);
+    dac0cs = 1;
+    delayMicroseconds(2);
+    digitalWrite(ldac0, LOW);
+    digitalWrite(ldac0, HIGH);
+  }
+  
+  else if(ch < NUMDACCHANNELS)
+  {
+    ch -= 4;
+    spi_select(spiDAC);
+    dac1cs = 0;
+    adspi.write(DAC_OFFSET | ch);
+    adspi.write(0x00);
+    adspi.write(steps);
+    dac1cs = 1;
+    delayMicroseconds(2);
+    digitalWrite(ldac1, LOW);
+    digitalWrite(ldac1, HIGH);
+  }
+  /*
   convertDACch(&ch, &thisdac, &thisldac);
-  SPI.beginTransaction(dacspi);
   digitalWrite(thisdac, LOW);
 	//SERIALPORT.println(steps);
   SPI.transfer(DAC_OFFSET | ch); // Write DAC channel offset register
@@ -1535,6 +1571,7 @@ void writeDACoffset(int ch, int8_t steps)
   delayMicroseconds(2);
   digitalWrite(thisldac, LOW);
   digitalWrite(thisldac, HIGH);
+  */
 }
 
 void writeDACgain(int ch, int8_t steps)
@@ -1543,6 +1580,35 @@ void writeDACgain(int ch, int8_t steps)
   int thisldac;
 
 	dacgcal[ch] = steps;
+
+  if(ch <= 3)
+  {
+    spi_select(spiDAC);
+    dac0cs = 0;
+    adspi.write(DAC_FINEGAIN | ch);
+    adspi.write(0x00);
+    adspi.write(steps);
+    dac0cs = 1;
+    delayMicroseconds(2);
+    digitalWrite(ldac0, LOW);
+    digitalWrite(ldac0, HIGH);
+  }
+  
+  else if(ch < NUMDACCHANNELS)
+  {
+    ch -= 4;
+    spi_select(spiDAC);
+    dac1cs = 0;
+    adspi.write(DAC_FINEGAIN | ch);
+    adspi.write(0x00);
+    adspi.write(steps);
+    dac1cs = 1;
+    delayMicroseconds(2);
+    digitalWrite(ldac1, LOW);
+    digitalWrite(ldac1, HIGH);
+  }
+
+  /*
   convertDACch(&ch, &thisdac, &thisldac);
   SPI.beginTransaction(dacspi);
   digitalWrite(thisdac, LOW);
@@ -1554,8 +1620,10 @@ void writeDACgain(int ch, int8_t steps)
   delayMicroseconds(2);
   digitalWrite(thisldac, LOW);
   digitalWrite(thisldac, HIGH);
+  */
 }
 
+/*
 void convertDACch(int *ch, int *spipin, int *ldacpin)
 {
   if(*ch <= 3)
@@ -1570,7 +1638,7 @@ void convertDACch(int *ch, int *spipin, int *ldacpin)
     *ch -= 4;
   }
 }
-
+*/
 ////////////////////
 //// UTILITIES ////
 ///////////////////
@@ -1706,18 +1774,17 @@ float getSingleReading(int adcchan)
   byte o3;
   if(adcchan < NUMADCCHANNELS)
   {
-    SPI.beginTransaction(adcspi);
-    digitalWrite(adc, LOW);
-    SPI.transfer(ADC_CHMODE | adcchan);   // Write channel mode register
-    SPI.transfer(ADC_MODE_SINGLECONV | ADC_MODE_DUMP | ADC_MODE_CLAMP); // Single conversion + dump mode + clamp
+    spi_select(spiADC);
+    adccs = 0;
+    adspi.write(ADC_CHMODE | adcchan);   // Write channel mode register
+    adspi.write(ADC_MODE_SINGLECONV | ADC_MODE_DUMP | ADC_MODE_CLAMP); // Single conversion + dump mode + clamp
     waitDRDY();                       // Waits until convertion finishes
-    SPI.transfer(ADC_CHDATA | ADC_REGREAD | adcchan);   // Read channel data register
-    statusbyte=SPI.transfer(0);   // Reads Channel 'ch' status
-    o2=SPI.transfer(0);           // Reads first byte
-    o3=SPI.transfer(0);           // Reads second byte
-    digitalWrite(adc,HIGH);
-    SPI.endTransaction();
-    
+    adspi.write(ADC_CHDATA | ADC_REGREAD | adcchan);   // Read channel data register
+    statusbyte=adspi.write(0);   // Reads Channel 'ch' status
+    o2=adspi.write(0);           // Reads first byte
+    o3=adspi.write(0);           // Reads second byte
+    adccs = 1;
+
     int decimal;
     decimal = twoByteToInt(o2,o3);
     float voltage;
@@ -1757,12 +1824,11 @@ void resetADC()
   delayMicroseconds(1);
   for(ch = 0; ch < NUMADCCHANNELS; ch++)
   {
-    SPI.beginTransaction(adcspi);
-    digitalWrite(adc, LOW);
-    SPI.transfer(ADC_CHSETUP | ch);// access channel setup register for each channel
-    SPI.transfer(ADC_CHSETUP_RNG10BI);// set +/-10V range
-    digitalWrite(adc,HIGH);
-    SPI.endTransaction();
+    spi_select(spiADC);
+    adccs = 0;
+    adspi.write(ADC_CHSETUP | ch);// access channel setup register for each channel
+    adspi.write(ADC_CHSETUP_RNG10BI);// set +/-10V range
+    adccs = 1;
   }
 }
 
@@ -1857,28 +1923,35 @@ float dacDataSend(int ch, float voltage)
 
 void DACintegersend(byte ch, int16_t value)
 {
+  char send_buff[3];
+  char recv_buff[3];
+
   if(ch <= 3)
   {
     g_DACsetpoint[ch] = value;
-    SPI.beginTransaction(dacspi);
-    digitalWrite(dac0, LOW);
-    SPI.transfer(DAC_DATA | ch); // Indicates to DAC to write channel 'ch' in the data register
-    SPI.transfer((uint8_t)(value >> 8));   // writes first byte
-    SPI.transfer((uint8_t)(value & 0xff));                // writes second byte
-    digitalWrite(dac0, HIGH);
-    SPI.endTransaction();
+
+    send_buff[0] = DAC_DATA | ch;
+    send_buff[1] = (char)(value >> 8);
+    send_buff[2] = (char)(value & 0xff);
+
+    spi_select(spiDAC);         
+    dac0cs = 0;
+    adspi.write(send_buff, 3, recv_buff, 3);
+    dac0cs = 1;
   }
+
   else if(ch < NUMDACCHANNELS)
   {
     g_DACsetpoint[ch] = value;
     ch -= 4;
-    SPI.beginTransaction(dacspi);
-    digitalWrite(dac1, LOW);    
-    SPI.transfer(DAC_DATA | ch); // Indicates to DAC to write channel 'ch' in the data register
-    SPI.transfer((uint8_t)(value >> 8)); // writes first byte
-    SPI.transfer((uint8_t)(value & 0xff)); // writes second byte
-    digitalWrite(dac1, HIGH);
-    SPI.endTransaction();
+    send_buff[0] = DAC_DATA | ch;
+    send_buff[1] = (char)(value >> 8);
+    send_buff[2] = (char)(value & 0xff);
+    
+    spi_select(spiDAC);  
+    dac1cs = 0;
+    adspi.write(send_buff, 3, recv_buff, 3);
+    dac1cs = 1;
   }
 }
 
@@ -2358,8 +2431,9 @@ void int_arg_ramp(InCommand *incommand)
   digitalWrite(data,HIGH);
 
   send_ack();//send ack and immediately attach interrupt
-  
-  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);  
+  g_sampleflag = false;
+  drdy_int.fall(&ramp_int); 
+  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);  
   //attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
 
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
@@ -2373,9 +2447,13 @@ void int_arg_ramp(InCommand *incommand)
         break;
       }     
     }
+    if(g_sampleflag)
+    {
+      ramp_event();
+    }
   }  
-  detachInterrupt(digitalPinToInterrupt(drdy));
-  
+  //detachInterrupt(digitalPinToInterrupt(drdy));
+  drdy_int.fall(NULL);
   g_rampadcidle();
   digitalWrite(data,LOW);
   SERIALPORT.println("RAMP_FINISHED");
@@ -2442,23 +2520,29 @@ void spec_ana(InCommand * incommand)
   digitalWrite(data,HIGH);
   
   send_ack();//send ack and immediately attach interrupt
-
-  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
-
+  g_sampleflag = false;
+  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
+  drdy_int.fall(&ramp_int);  
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
   while(!g_done)
   {
+    
     if(query_serial(incommand))
     {
-      if(strcmp("STOP", incommand->token[0]) == 0)
+      if(strcmp("STOP", incommand->token[0]) == 0)      
       {
         break;
       }     
     }
+    if(g_sampleflag)
+    {
+      ramp_event();
+    }
   }  
-
-  detachInterrupt(digitalPinToInterrupt(drdy));
+  //detachInterrupt(digitalPinToInterrupt(drdy));
+  drdy_int.fall(NULL);
+  
   g_rampadcidle();
   digitalWrite(data,LOW);
   SERIALPORT.println("READ_FINISHED");
@@ -2622,22 +2706,28 @@ void awg_ramp(InCommand *incommand)
   digitalWrite(data,HIGH);
   
   send_ack();//send ack and immediately attach interrupt  
-
-  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
-
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
-
+  g_sampleflag = false;
+  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
+  drdy_int.fall(&ramp_int);  
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
   while(!g_done)
   {
+    
     if(query_serial(incommand))
     {
-      if(strcmp("STOP", incommand->token[0]) == 0)
+      if(strcmp("STOP", incommand->token[0]) == 0)      
       {
         break;
       }     
     }
+    if(g_sampleflag)
+    {
+      ramp_event();
+    }
   }  
-  detachInterrupt(digitalPinToInterrupt(drdy));
+  //detachInterrupt(digitalPinToInterrupt(drdy));
+  drdy_int.fall(NULL);
   
   g_rampadcidle();
   digitalWrite(data,LOW);
@@ -2857,22 +2947,29 @@ void awg_arg_ramp(InCommand *incommand)
   digitalWrite(data,HIGH);
   
   send_ack();//send ack and immediately attach interrupt  
-
-  attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
-
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only master has control)
-
+  g_sampleflag = false;
+  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
+  drdy_int.fall(&ramp_int);  
+  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
+  
   while(!g_done)
   {
+    
     if(query_serial(incommand))
     {
-      if(strcmp("STOP", incommand->token[0]) == 0)
+      if(strcmp("STOP", incommand->token[0]) == 0)      
       {
         break;
       }     
     }
+    if(g_sampleflag)
+    {
+      ramp_event();
+    }
   }  
-  detachInterrupt(digitalPinToInterrupt(drdy));
+  //detachInterrupt(digitalPinToInterrupt(drdy));
+  drdy_int.fall(NULL);
+  
   
   g_rampadcidle();
   digitalWrite(data,LOW);
@@ -2991,6 +3088,7 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
   drdy_int.fall(&ramp_int);  
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
   
+  
   while(!g_done)
   {
     
@@ -3001,8 +3099,6 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
         break;
       }     
     }
-    //rtos::ThisThread::sleep_for(10);
-    
     if(g_sampleflag)
     {
       ramp_event();
@@ -3037,13 +3133,12 @@ void ramp_event(void)//event for ramp
       {
         for(i = 0; i < g_numrampADCchannels; i++) //discard first loop
         {
-          SPI.beginTransaction(adcspi);
-          digitalWrite(adc, LOW);
-          SPI.transfer(ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i]); //Read channel data register
-          SPI.transfer(0); // Read/write first byte
-          SPI.transfer(0); // Read/write second byte
-          digitalWrite(adc, HIGH);
-          SPI.endTransaction();
+          spi_select(spiADC);
+          adccs = 0;
+          adspi.write(ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i]); //Read channel data register
+          adspi.write(0); // Read/write first byte
+          adspi.write(0); // Read/write second byte
+          adccs = 1;
           g_firstsamples = false;          
         }        
       }
@@ -3051,13 +3146,12 @@ void ramp_event(void)//event for ramp
       {
         for(i = 0; i < g_numrampADCchannels; i++)
         {
-          SPI.beginTransaction(adcspi);
-          digitalWrite(adc, LOW);
-          SPI.transfer(ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i]); //Read channel data register
-          SERIALPORT.write(SPI.transfer(0)); // Read/write first byte
-          SERIALPORT.write(SPI.transfer(0)); // Read/write second byte
-          digitalWrite(adc, HIGH);
-          SPI.endTransaction();      
+          spi_select(spiADC);
+          adccs = 0;
+          adspi.write(ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i]); //Read channel data register
+          SERIALPORT.write(adspi.write(0)); // Read/write first byte
+          SERIALPORT.write(adspi.write(0)); // Read/write second byte
+          adccs = 1;          
         }
       }
       if(g_numwaves == 0)
@@ -3101,13 +3195,12 @@ void ramp_event(void)//event for ramp
             waitDRDY();
             for(i = 0; i < g_numrampADCchannels; i++)
             {
-              SPI.beginTransaction(adcspi);
-              digitalWrite(adc, LOW);
-              SPI.transfer(ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i]); //Read channel data register
-              SERIALPORT.write(SPI.transfer(0)); // Read/write first byte
-              SERIALPORT.write(SPI.transfer(0)); // Read/write second byte
-              digitalWrite(adc, HIGH);
-              SPI.endTransaction();              
+              spi_select(spiADC);
+              adccs = 0;
+              adspi.write(ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i]); //Read channel data register
+              SERIALPORT.write(adspi.write(0)); // Read/write first byte
+              SERIALPORT.write(adspi.write(0)); // Read/write second byte
+              adccs = 1;
             }
             drdy_int.fall(NULL);
             //detachInterrupt(digitalPinToInterrupt(drdy));            
@@ -3143,14 +3236,14 @@ void ramp_event(void)//event for ramp
 void g_configurerampADCchannels(void)
 {
   uint8_t i;
+  spi_select(spiADC);
+  adccs = 0;
   for(i = 1; i <= g_numrampADCchannels; i++) // Configure ADC channels, the first channel to sample gets configured last
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
   {
-    SPI.transfer(ADC_CHSETUP | g_ADCchanselect[g_numrampADCchannels - i]);//Access channel setup register
-    SPI.transfer(ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
-    SPI.transfer(ADC_CHMODE | g_ADCchanselect[g_numrampADCchannels - i]);   //Access channel mode register
-    SPI.transfer(ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping   
+    adspi.write(ADC_CHSETUP | g_ADCchanselect[g_numrampADCchannels - i]);//Access channel setup register
+    adspi.write(ADC_CHSETUP_RNG10BI | ADC_CHSETUP_ENABLE);//set +/-10V range and enable for continuous mode
+    adspi.write(ADC_CHMODE | g_ADCchanselect[g_numrampADCchannels - i]);   //Access channel mode register
+    adspi.write(ADC_MODE_CONTCONV | ADC_MODE_CLAMP);  //Continuous conversion with clamping   
 
     #ifdef DEBUGRAMP
     SERIALPORT.print("ADC ch: ");
@@ -3158,10 +3251,9 @@ void g_configurerampADCchannels(void)
     SERIALPORT.println(" selected");
     #endif
   }
-  SPI.transfer(ADC_IO); //Write to ADC IO register
-  SPI.transfer(ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and wait for sync, P1 as input
-  digitalWrite(adc, HIGH);
-  SPI.endTransaction();
+  adspi.write(ADC_IO); //Write to ADC IO register
+  adspi.write(ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and wait for sync, P1 as input
+  adccs = 1;
 }
 
 
@@ -3199,20 +3291,19 @@ void g_configurerampDACchannels(void)
 void g_rampadcidle(void)
 {
   uint8_t i;
-  SPI.beginTransaction(adcspi);
-  digitalWrite(adc, LOW);
-  SPI.transfer(ADC_IO); // Write to ADC IO register
-  SPI.transfer(ADC_IO_DEFAULT | ADC_IO_P1DIR); // Change RDY to trigger when any channel complete
+
+  spi_select(spiADC);
+  adccs = 0;
+  adspi.write(ADC_IO); // Write to ADC IO register
+  adspi.write(ADC_IO_DEFAULT | ADC_IO_P1DIR); // Change RDY to trigger when any channel complete
   for(i = 0; i < NUMADCCHANNELS; i++)
   {
-    SPI.transfer(ADC_CHSETUP | i); // Access channel setup register
-    SPI.transfer(ADC_CHSETUP_RNG10BI); // set +/-10V range and disable for continuous mode
-    SPI.transfer(ADC_CHMODE | g_ADCchanselect[i]); // Access channel mode register
-    SPI.transfer(ADC_MODE_IDLE); // Set ADC to idle
+    adspi.write(ADC_CHSETUP | i); // Access channel setup register
+    adspi.write(ADC_CHSETUP_RNG10BI); // set +/-10V range and disable for continuous mode
+    adspi.write(ADC_CHMODE | g_ADCchanselect[i]); // Access channel mode register
+    adspi.write(ADC_MODE_IDLE); // Set ADC to idle
   }
-  digitalWrite(adc, HIGH);
-  SPI.endTransaction();
-
+  adccs = 1;
 }
 
 
