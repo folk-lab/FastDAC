@@ -17,6 +17,9 @@
 #define NUMADCCHANNELS 4
 
 #define CAL_SETTLE_TIME 3000 //time in us for DACs to settle before auto cal ADC
+#define GIGA_NUM_INTS 149 //number of irq channels in Giga (STM32H747)
+#define DEFAULT_INT_PRI 0x03 //interrupt priority to set all irq channels, set specific ones afterwards
+
 
 //AD7734 Register addresses
 #define ADC_IO 0x01

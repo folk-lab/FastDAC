@@ -35,8 +35,8 @@
 #define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
 #define AWGMAXWAVES 2 //Maximum number of individual waveforms
 
-#define ARGMAXSETPOINTS 10000 //Maximum number of setpoints in arbitrary ramp
-#define ARGMAXRAMPS 4 //Maximum number of arbitrary ramps
+#define ARGMAXSETPOINTS 200000 //Maximum number of setpoints in arbitrary ramp
+#define ARGMAXRAMPS 8 //Maximum number of arbitrary ramps
 
 #define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
 
@@ -51,7 +51,6 @@
 #define BIT47 0x100000000000
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART, try to stay as integer divisor of 84MHz mclk
-
 
 bool g_clock_synced = false;
 
@@ -234,7 +233,7 @@ void setup()
   
 	loaddaccals();
 	//Initialize saved DAC setpoints to 0
-  for(int i = 0; i < NUMDACCHANNELS; i++)
+  for(uint8_t i = 0; i < NUMDACCHANNELS; i++)
   {
     g_DACsetpoint[i] = 0;
   }
@@ -242,16 +241,60 @@ void setup()
   //Add and remove interrupt once to decrease latency
   drdy_int.fall(&ramp_int);
   drdy_int.fall(NULL);
-  SDRAM.begin(SDRAM_START_ADDRESS + sizeof(ARGramp[ARGMAXRAMPS]));
-  g_argramp = (ARGramp*)SDRAM_START_ADDRESS;
-  SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]));
-  SERIALPORT.println(sizeof(g_argramp));
+  SDRAM.begin();
+
+  //Allocate and clear arbitrary ramps
+  for(uint8_t i = 0; i < ARGMAXRAMPS; i++)
+  {
+    g_argramp[i] = (ARGramp*)SDRAM.malloc(sizeof(ARGramp));
+    g_argramp[i]->numsetpoints = 0;
+  }
+  set_all_int_priorities(DEFAULT_INT_PRI); //Set all priorites to something lower than highest
+  NVIC_SetPriority(USART2_IRQn, 0x00); //Set UART2 interrupt priority highest
+  set_gpio_int_priorities(0x01); //Set gpio priority below UART2
+  set_spi_int_priorities(0x02); //Set SPI interrupt priorities below gpio   
+  //print_interrupt_priorities();
+  //SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]));
 }
-void intset(void)
+void print_interrupt_priorities(void)
 {
-
+  for(uint32_t i = 0; i < 150; i++)
+  {
+    SERIALPORT.print("INT");
+    SERIALPORT.print(i);
+    SERIALPORT.print(":");
+    SERIALPORT.print(NVIC_GetPriority((IRQn_Type)i));
+    SERIALPORT.print(",");
+  }
 }
 
+void set_all_int_priorities(uint32_t priority)
+{
+  for(uint32_t i = 0; i <= GIGA_NUM_INTS; i++)
+  {
+    NVIC_SetPriority((IRQn_Type)i, priority);
+  }
+}
+
+void set_gpio_int_priorities(uint32_t priority)
+{
+  NVIC_SetPriority(EXTI0_IRQn, priority);
+  NVIC_SetPriority(EXTI1_IRQn, priority);
+  NVIC_SetPriority(EXTI2_IRQn, priority);
+  NVIC_SetPriority(EXTI3_IRQn, priority);
+  NVIC_SetPriority(EXTI4_IRQn, priority);
+  NVIC_SetPriority(EXTI9_5_IRQn, priority);
+  NVIC_SetPriority(EXTI15_10_IRQn, priority);  
+}
+void set_spi_int_priorities(uint32_t priority)
+{
+  NVIC_SetPriority(SPI1_IRQn, priority);
+  NVIC_SetPriority(SPI2_IRQn, priority);
+  NVIC_SetPriority(SPI3_IRQn, priority);
+  NVIC_SetPriority(SPI4_IRQn, priority);
+  NVIC_SetPriority(SPI5_IRQn, priority);
+  NVIC_SetPriority(SPI6_IRQn, priority);  
+}
 ////////////////
 //// ROUTER ////
 ///////////////
@@ -2292,9 +2335,9 @@ void int_arg_ramp(InCommand *incommand)
   for(i = 0; i < g_numargramps; i++)
   {
     char * channelsramp = incommand->token[i + 2];
-    g_argramp[i].numDACchannels = strlen(channelsramp);
-    //g_argramp[i].setpointcount = 0;
-    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    g_argramp[i]->numDACchannels = strlen(channelsramp);
+    //g_argramp[i]->setpointcount = 0;
+    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
       uint8_t argdac = channelsramp[j] - '0';
       if(argdac >= NUMDACCHANNELS)
@@ -2302,7 +2345,7 @@ void int_arg_ramp(InCommand *incommand)
         range_error();
         return;
       }
-      g_argramp[i].DACchanselect[j] = argdac;
+      g_argramp[i]->DACchanselect[j] = argdac;
     }
   }
 #ifdef DEBUGRAMP
@@ -2313,9 +2356,9 @@ void int_arg_ramp(InCommand *incommand)
     SERIALPORT.print("ARG ");
     SERIALPORT.print(i);
     SERIALPORT.print(" DAC Channels: ");
-    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
-      SERIALPORT.print(g_argramp[i].DACchanselect[j]);
+      SERIALPORT.print(g_argramp[i]->DACchanselect[j]);
       SERIALPORT.print(" ");
     }
     SERIALPORT.println(" ");
@@ -2352,9 +2395,9 @@ void int_arg_ramp(InCommand *incommand)
   g_numsteps = 0;
   for(i = 0; i < g_numargramps; i++)
   {
-    if(g_argramp[i].numsetpoints > g_numsteps)
+    if(g_argramp[i]->numsetpoints > g_numsteps)
     {
-      g_numsteps = g_argramp[i].numsetpoints;
+      g_numsteps = g_argramp[i]->numsetpoints;
     }
   }
 
@@ -2405,9 +2448,9 @@ void int_arg_ramp(InCommand *incommand)
   //Set ARG DACs to initial point
   for(i = 0; i < g_numargramps; i++)
   {
-    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
-      DACintegersend(g_argramp[i].DACchanselect[j], g_argramp[i].setpoint[0]);
+      DACintegersend(g_argramp[i]->DACchanselect[j], g_argramp[i]->setpoint[0]);
     }
   }
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
@@ -2803,9 +2846,9 @@ void awg_arg_ramp(InCommand *incommand)
   for(i = 0; i < g_numargramps; i++)
   {
     char * channelsramp = incommand->token[i + g_numwaves + 2];
-    g_argramp[i].numDACchannels = strlen(channelsramp);
+    g_argramp[i]->numDACchannels = strlen(channelsramp);
     //g_argramp[i].setpointcount = 0;
-    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
       uint8_t argdac = channelsramp[j] - '0';
       if(argdac >= NUMDACCHANNELS)
@@ -2813,7 +2856,7 @@ void awg_arg_ramp(InCommand *incommand)
         range_error();
         return;
       }
-      g_argramp[i].DACchanselect[j] = argdac;
+      g_argramp[i]->DACchanselect[j] = argdac;
     }
   }
 #ifdef DEBUGRAMP
@@ -2824,9 +2867,9 @@ void awg_arg_ramp(InCommand *incommand)
     SERIALPORT.print("ARG ");
     SERIALPORT.print(i);
     SERIALPORT.print(" DAC Channels: ");
-    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
-      SERIALPORT.print(g_argramp[i].DACchanselect[j]);
+      SERIALPORT.print(g_argramp[i]->DACchanselect[j]);
       SERIALPORT.print(" ");
     }
     SERIALPORT.println(" ");
@@ -2864,9 +2907,9 @@ void awg_arg_ramp(InCommand *incommand)
   g_numsteps = 0;
   for(i = 0; i < g_numargramps; i++)
   {
-    if(g_argramp[i].numsetpoints > g_numsteps)
+    if(g_argramp[i]->numsetpoints > g_numsteps)
     {
-      g_numsteps = g_argramp[i].numsetpoints;
+      g_numsteps = g_argramp[i]->numsetpoints;
     }
   }
 
@@ -2921,9 +2964,9 @@ void awg_arg_ramp(InCommand *incommand)
   //Set ARG DACs to initial point
   for(i = 0; i < g_numargramps; i++)
   {
-    for(j = 0; j < g_argramp[i].numDACchannels; j++)
+    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
-      DACintegersend(g_argramp[i].DACchanselect[j], g_argramp[i].setpoint[0]);
+      DACintegersend(g_argramp[i]->DACchanselect[j], g_argramp[i]->setpoint[0]);
     }
   }  
   
@@ -3216,11 +3259,11 @@ void ramp_event(void)//event for ramp
             //get next arbitrary ramp DAC step ready
             for(i = 0; i < g_numargramps; i++)
             {
-              if(g_stepcount < g_argramp[i].numsetpoints)
+              if(g_stepcount < g_argramp[i]->numsetpoints)
               {
-                for(j = 0; j < g_argramp[i].numDACchannels; j++)
+                for(j = 0; j < g_argramp[i]->numDACchannels; j++)
                 {
-                  DACintegersend(g_argramp[i].DACchanselect[j], g_argramp[i].setpoint[g_stepcount]);
+                  DACintegersend(g_argramp[i]->DACchanselect[j], g_argramp[i]->setpoint[g_stepcount]);
                 }
               }
             }
@@ -3328,7 +3371,7 @@ void add_ramp(InCommand *incommand)
   }
   uint32_t numsetpoints = (incommand->paramcount - 2);
   
-  if((numsetpoints + g_argramp[rampnumber].numsetpoints) > ARGMAXSETPOINTS)
+  if((numsetpoints + g_argramp[rampnumber]->numsetpoints) > ARGMAXSETPOINTS)
   {
     SERIALPORT.print("ERROR, Max setpoints = ");
     SERIALPORT.println(ARGMAXSETPOINTS);
@@ -3347,22 +3390,22 @@ void add_ramp(InCommand *incommand)
   //all good, add the ramp
   for(uint32_t i = 0; i < numsetpoints; i++)
   {
-    g_argramp[rampnumber].setpoint[i + g_argramp[rampnumber].numsetpoints] = voltageToInt16(atof(incommand->token[i + 2]) / 1000.0);
+    g_argramp[rampnumber]->setpoint[i + g_argramp[rampnumber]->numsetpoints] = voltageToInt16(atof(incommand->token[i + 2]) / 1000.0);
     
   }
   send_ack();
-  g_argramp[rampnumber].numsetpoints += numsetpoints;
+  g_argramp[rampnumber]->numsetpoints += numsetpoints;
   SERIALPORT.print("RAMP,");
   SERIALPORT.print(rampnumber);
   SERIALPORT.print(",");
-  SERIALPORT.println(g_argramp[rampnumber].numsetpoints);
+  SERIALPORT.println(g_argramp[rampnumber]->numsetpoints);
 #ifdef DEBUGRAMP  
-  for(uint32_t i = 0; i < g_argramp[rampnumber].numsetpoints; i++)
+  for(uint32_t i = 0; i < g_argramp[rampnumber]->numsetpoints; i++)
   {
     SERIALPORT.print("Setpoint ");
     SERIALPORT.print(i);
     SERIALPORT.print(" = ");
-    SERIALPORT.println(g_argramp[rampnumber].setpoint[i]);
+    SERIALPORT.println(g_argramp[rampnumber]->setpoint[i]);
   }
   
   SERIALPORT.print(F("Free RAM = ")); //F function does the same and is now a built in library, in IDE > 1.0.0
@@ -3390,7 +3433,7 @@ void clr_ramp(InCommand *incommand)
     return;
   }
   send_ack();
-  g_argramp[rampnumber].numsetpoints = 0;
+  g_argramp[rampnumber]->numsetpoints = 0;
   
   SERIALPORT.print("RAMP,");
   SERIALPORT.print(rampnumber);
@@ -3420,7 +3463,7 @@ void check_ramp(InCommand *incommand)
   SERIALPORT.print("RAMP,");
   SERIALPORT.print(rampnumber);
   SERIALPORT.print(",");
-  SERIALPORT.println(g_argramp[rampnumber].numsetpoints);
+  SERIALPORT.println(g_argramp[rampnumber]->numsetpoints);
 }
 
 
