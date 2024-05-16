@@ -9,8 +9,6 @@ Where items enclosed in braces `{}` must be substituted for values.
 
 Where a DAC or ADC channel is specified, they are zero-indexed; An 8-channel DAC is addressed as channels 0-7, and a 4-channel ADC is addressed as channels 0-3.
 
-The FastDAC can execute the following operations: `*IDN?`, `*RDY?`, `GET_ADC`, `RAMP_SMART`, `INT_RAMP`, `SPEC_ANA`, `CONVERT_TIME`, `READ_CONVERT_TIME`, `GET_DAC`, `ADC_CH_ZERO_SC_CAL`, `ADC_CH_FULL_SC_CAL`, `CAL_ADC_WITH_DAC`, `WRITE_ADC_CAL`, `READ_ADC_CAL`, `DAC_OFFSET_ADJ`, `DAC_GAIN_ADJ`, `DAC_RESET_CAL`, `FULL_SCALE`, `SET_MODE`, `ARM_SYNC`, `CHECK_SYNC`, `ADD_WAVE`, `CLR_WAVE`, `CHECK_WAVE`, `AWG_RAMP`, `START_PID`, `STOP_PID`, `SET_PID_TUNE`, `SET_PID_SETP`, `SET_PID_LIMS`, `SET_PID_DIR`, `SET_PID_SLEW`
-
 When the FastDAC does not recognize the operation, it return the string `NOP`, which stands for "No Operation"
 
 If the operation is recognized but some parameters are incorrect, it will return `SYNTAX_ERROR` or `RANGE_ERROR`
