@@ -40,8 +40,9 @@
 
 #define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
 
-#define COMMANDBUFFERSIZE 1025 //Buffer for incoming command
-#define MAXPARAMS 300 //maximum number of parameters to be parsed in a single command
+
+#define COMMANDBUFFERSIZE 10025 //Buffer for incoming command
+#define MAXPARAMS 3000 //maximum number of parameters to be parsed in a single command
 
 #define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
