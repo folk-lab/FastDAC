@@ -24,7 +24,7 @@
 #include "FastDACeeprom.h"
 #include "mbed.h"
 #include "rtos.h"
-//#include "mbed/events/include/events/mbed_events.h"
+#include "mbed/events/include/events/mbed_events.h"
 #include "SDRAM.h"
 
 //using namespace mbed;
@@ -32,10 +32,10 @@
 
 #define SENDACK //Comment this to stop sending ACKs for every command
 
-#define AWGMAXSETPOINTS 100 //Maximum number of setpoints of waveform generator
-#define AWGMAXWAVES 2 //Maximum number of individual waveforms
+#define AWGMAXSETPOINTS 2000 //Maximum number of setpoints of waveform generator
+#define AWGMAXWAVES 8 //Maximum number of individual waveforms
 
-#define ARGMAXSETPOINTS 200000 //Maximum number of setpoints in arbitrary ramp
+#define ARGMAXSETPOINTS 400000 //Maximum number of setpoints in arbitrary ramp
 #define ARGMAXRAMPS 8 //Maximum number of arbitrary ramps
 
 #define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
@@ -51,7 +51,7 @@
 #define BIT31 0x10000000 //Some scaling constants for fixed-point math
 #define BIT47 0x100000000000
 
-#define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART, try to stay as integer divisor of 84MHz mclk
+#define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
 bool g_clock_synced = false;
 
@@ -152,6 +152,7 @@ typedef struct PIDparam
 {
   bool active = false;
   bool forward_dir = true;
+  bool trig = false;
   uint8_t ADCchan = 0;
   uint8_t DACchan = 0;
   uint16_t sampletime = 10;
@@ -180,6 +181,8 @@ mbed::SPI adspi(digitalPinToPinName(mosi), digitalPinToPinName(miso), digitalPin
 mbed::DigitalOut dac0cs(digitalPinToPinName(dac0));
 mbed::DigitalOut dac1cs(digitalPinToPinName(dac1));
 mbed::DigitalOut adccs(digitalPinToPinName(adc));
+events::EventQueue queue(32 * EVENTS_EVENT_SIZE);
+rtos::Thread pidThread;
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
 typedef enum SPI_select {spiADC, spiDAC} SPI_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
@@ -247,15 +250,20 @@ void setup()
   //Allocate and clear arbitrary ramps
   for(uint8_t i = 0; i < ARGMAXRAMPS; i++)
   {
-    g_argramp[i] = (ARGramp*)SDRAM.malloc(sizeof(ARGramp));
+    g_argramp[i] = (ARGramp*)SDRAM.malloc(sizeof(ARGramp) + 16);//allocate a few extra bytes for alignment
     g_argramp[i]->numsetpoints = 0;
   }
   set_all_int_priorities(DEFAULT_INT_PRI); //Set all priorites to something lower than highest
   NVIC_SetPriority(USART2_IRQn, 0x00); //Set UART2 interrupt priority highest
   set_gpio_int_priorities(0x01); //Set gpio priority below UART2
   set_spi_int_priorities(0x02); //Set SPI interrupt priorities below gpio   
+  
+  //rtos::Thread pidThread;
+
+  pidThread.start(callback(&queue, &events::EventQueue::dispatch_forever));
+  pidThread.set_priority(osPriorityISR);
   //print_interrupt_priorities();
-  //SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]));
+  //SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]) + (16 * ARGMAXRAMPS));
 }
 void print_interrupt_priorities(void)
 {
@@ -501,6 +509,10 @@ void router(InCommand *incommand)
   {  
     add_ramp(incommand);
   }
+  else if(strcmp("ADD_RAMP_RAW", cmd) == 0)  
+  {  
+    add_ramp_raw(incommand);
+  }
   else if(strcmp("CLR_RAMP", cmd) == 0)  
   {  
     clr_ramp(incommand);
@@ -508,7 +520,11 @@ void router(InCommand *incommand)
   else if(strcmp("CHECK_RAMP", cmd) == 0)  
   {  
     check_ramp(incommand);
-  }  
+  }
+  else if(strcmp("CHECK_RAMP_CRC", cmd) == 0)  
+  {  
+    check_ramp_crc(incommand);
+  }
   else if(strcmp("AWG_RAMP", cmd) == 0)  
   {  
     awg_ramp(incommand);
@@ -873,24 +889,31 @@ void start_pid(InCommand *incommand)
   adspi.write(ADC_IO); //Write to ADC IO register
   adspi.write(ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
   adccs = 1;
-  
-  attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
+  //drdy_int.fall(queue.event(&pidint));
+  adspi.unlock();  
+  drdy_int.fall(pidint);
+  delayMicroseconds(100);  
+  //attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
 
   
 }
-//PID Interrupts every ADC sample
 void pidint(void)
 {
+  queue.call(pidevent);
+}
+//PID Interrupts every ADC sample
+void pidevent(void)
+{  
   uint8_t b1, b2;
   int decimal;
-
+  adspi.lock();
   spi_select(spiADC);
   adccs = 0;
   adspi.write(ADC_CHDATA | ADC_REGREAD | g_pidparam[0].ADCchan); //Read channel data register
   b1 = adspi.write(0); // Read first byte
   b2 = adspi.write(0); // Read second byte
   adccs = 1;
-
+  adspi.unlock();
   decimal = twoByteToInt(b1, b2);
   g_pidparam[0].adcin = map2(decimal, 0, 65536, -10000.0, 10000.0);
     
@@ -908,7 +931,9 @@ void pidint(void)
     {
       g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
     }
+    adspi.lock();
     writeDAC(g_pidparam[0].DACchan, g_pidparam[0].dacoutlim, true);
+    adspi.unlock();
     g_pidparam[0].loopcount++;
     if(g_pidparam[0].loopcount >= 10)
     {
@@ -927,6 +952,7 @@ void pidint(void)
     }
     
   }
+  
 }
 
 //Stop PID, no inputs params, just stops 
@@ -934,7 +960,8 @@ void stop_pid(InCommand * incommand)
 {
   uint8_t i = 0;
   pid0.SetMode(MANUAL);
-  detachInterrupt(digitalPinToInterrupt(drdy));
+  drdy_int.fall(NULL);
+  //detachInterrupt(digitalPinToInterrupt(drdy));
   
   spi_select(spiADC);
   adccs = 0;
@@ -1572,8 +1599,6 @@ void dac_ch_reset_cal(uint8_t ch)
 
 void writeDACoffset(int ch, int8_t steps)
 {
-  //int thisdac;
-  //int thisldac;
 
 	dacocal[ch] = steps;
  
@@ -1603,19 +1628,6 @@ void writeDACoffset(int ch, int8_t steps)
     digitalWrite(ldac1, LOW);
     digitalWrite(ldac1, HIGH);
   }
-  /*
-  convertDACch(&ch, &thisdac, &thisldac);
-  digitalWrite(thisdac, LOW);
-	//SERIALPORT.println(steps);
-  SPI.transfer(DAC_OFFSET | ch); // Write DAC channel offset register
-  SPI.transfer(0x00);   // writes first byte
-  SPI.transfer(steps);
-  digitalWrite(thisdac,HIGH);
-  SPI.endTransaction(); 
-  delayMicroseconds(2);
-  digitalWrite(thisldac, LOW);
-  digitalWrite(thisldac, HIGH);
-  */
 }
 
 void writeDACgain(int ch, int8_t steps)
@@ -1651,38 +1663,8 @@ void writeDACgain(int ch, int8_t steps)
     digitalWrite(ldac1, LOW);
     digitalWrite(ldac1, HIGH);
   }
-
-  /*
-  convertDACch(&ch, &thisdac, &thisldac);
-  SPI.beginTransaction(dacspi);
-  digitalWrite(thisdac, LOW);
-  SPI.transfer(DAC_FINEGAIN  | ch); // Write DAC channel fine gain register
-  SPI.transfer(0x00);   // writes first byte
-  SPI.transfer(steps);
-  digitalWrite(thisdac,HIGH);
-  SPI.endTransaction(); 
-  delayMicroseconds(2);
-  digitalWrite(thisldac, LOW);
-  digitalWrite(thisldac, HIGH);
-  */
 }
 
-/*
-void convertDACch(int *ch, int *spipin, int *ldacpin)
-{
-  if(*ch <= 3)
-  {
-    *spipin = dac0;
-    *ldacpin = ldac0;
-  }
-  else
-  {
-    *spipin = dac1;
-    *ldacpin = ldac1;
-    *ch -= 4;
-  }
-}
-*/
 ////////////////////
 //// UTILITIES ////
 ///////////////////
@@ -3355,7 +3337,7 @@ void g_rampadcidle(void)
 /// Arbitrary RAMP ///
 //////////////////////
 //ADD_RAMP,<ramp number, 0 indexed)>,<Setpoint 0 in mV>,….<Setpoint n in mV>
-//Maximum ~1024 chars per call, due to possible serial buffer overrun
+//Maximum ~10000 chars per call, due to possible serial buffer overrun
 void add_ramp(InCommand *incommand)
 {
   if(incommand->paramcount < 3)
@@ -3414,6 +3396,71 @@ void add_ramp(InCommand *incommand)
 #endif
 }
 
+//ADD_RAMP_RAW,<ramp number, 0 indexed)>,<Number of setpoints to stream>
+//Will return ack, then send samples as stream of big endian 16-bit integers
+//Will timeout if nothing received for 3 seconds
+void add_ramp_raw(InCommand *incommand)
+{
+  if(incommand->paramcount != 3)
+  {
+    syntax_error();
+    return;
+  }
+  uint8_t rampnumber = atoi(incommand->token[1]);
+  if(rampnumber >= ARGMAXRAMPS)
+  {
+    SERIALPORT.print("ERROR, Max ramps = ");
+    SERIALPORT.println(ARGMAXRAMPS);
+    return;
+  }
+  uint32_t incoming_setpoints = atoi(incommand->token[2]);
+  uint32_t previous_setpoints = g_argramp[rampnumber]->numsetpoints;
+  if((previous_setpoints + incoming_setpoints) > ARGMAXSETPOINTS)
+  {
+    SERIALPORT.print("ERROR, Max setpoints = ");
+    SERIALPORT.println(ARGMAXSETPOINTS);
+    return;
+  }
+  send_ack();
+  uint32_t setpoints_received = 0;
+  uint32_t previous_millis = millis();
+  uint32_t current_millis;
+  while(setpoints_received < incoming_setpoints)
+  {
+    current_millis = millis();
+    if(SERIALPORT.available() >= 2)
+    {
+      int16_t newsetpoint = (int16_t)SERIALPORT.read() << 8;
+      newsetpoint |= SERIALPORT.read();
+      g_argramp[rampnumber]->setpoint[previous_setpoints + setpoints_received] = newsetpoint;
+      setpoints_received++;
+      previous_millis = current_millis;
+    }
+    if(current_millis - previous_millis >= RAMP_SEND_TIMEOUT)    
+    {
+      SERIALPORT.println("TIMEOUT");
+      break;
+    }
+  }
+  
+  g_argramp[rampnumber]->numsetpoints += setpoints_received;
+  SERIALPORT.print("RAMP,");
+  SERIALPORT.print(rampnumber);
+  SERIALPORT.print(",");
+  SERIALPORT.println(g_argramp[rampnumber]->numsetpoints);
+#ifdef DEBUGRAMP  
+  for(uint32_t i = 0; i < g_argramp[rampnumber]->numsetpoints; i++)
+  {
+    SERIALPORT.print("Setpoint ");
+    SERIALPORT.print(i);
+    SERIALPORT.print(" = ");
+    SERIALPORT.println(g_argramp[rampnumber]->setpoint[i]);
+  }
+  
+  //SERIALPORT.print(F("Free RAM = ")); //F function does the same and is now a built in library, in IDE > 1.0.0
+  //SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
+#endif
+}
 
 //CLR_RAMP,<ramp number>
 //Returns RAMP,<ramp number>,0
@@ -3465,6 +3512,43 @@ void check_ramp(InCommand *incommand)
   SERIALPORT.print(rampnumber);
   SERIALPORT.print(",");
   SERIALPORT.println(g_argramp[rampnumber]->numsetpoints);
+}
+
+//CHECK_RAMP_CRC,<ramp number>
+//Returns RAMP,<ramp number>,<total number of setpoints>,<CRC32>
+void check_ramp_crc(InCommand *incommand) 
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  //uint8_t wavenumber = DB[1].toInt();
+  uint8_t rampnumber = atoi(incommand->token[1]);
+  if(rampnumber >= ARGMAXRAMPS)
+  {
+    range_error();
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
+    return;
+  }
+  send_ack();
+  uint32_t crc = 0;
+  if(g_argramp[rampnumber]->numsetpoints > 0)
+  {
+    mbed::MbedCRC<POLY_32BIT_ANSI, 32> ct;
+    ct.compute((void *)&(g_argramp[rampnumber]->setpoint[0]), (g_argramp[rampnumber]->numsetpoints * 2), &crc);
+  }
+  
+  
+  SERIALPORT.print("RAMP,");
+  SERIALPORT.print(rampnumber);
+  SERIALPORT.print(",");
+  SERIALPORT.print(g_argramp[rampnumber]->numsetpoints);
+  //SERIALPORT.print(",0x");
+  //SERIALPORT.println(crc, HEX);
+  SERIALPORT.print(",");
+  SERIALPORT.println(crc);
 }
 
 
