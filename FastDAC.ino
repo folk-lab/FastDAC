@@ -2939,11 +2939,14 @@ void awg_ramp_int()//interrupt for AWG ramp
             {
               g_nextloop = true;
               g_awgwave[i].setpointcount = 0;
-            }
-            //update wave dacs
-            for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+            }            
+            //If we aren't finished update wave dacs
+            if((g_nextloop == false) || (g_loopcount < (g_numloops - 1)) || (g_stepcount < (g_numsteps - 1)))
             {
-              DACintegersend(g_awgwave[i].DACchanselect[j], g_awgwave[i].setpoint[g_awgwave[i].setpointcount]);
+              for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+              {
+                DACintegersend(g_awgwave[i].DACchanselect[j], g_awgwave[i].setpoint[g_awgwave[i].setpointcount]);
+              }
             }          
           }
         }
