@@ -6,6 +6,7 @@ ExternalEEPROM extprom;
 
 void eepromtest(void)
 {
+    /*
     SERIALPORT.println("Init external eeprom");
     initeeprom();
     SERIALPORT.println("Write ID");
@@ -14,6 +15,7 @@ void eepromtest(void)
     SERIALPORT.println("Read ID");
     readeepromid(idtest);
     SERIALPORT.println(idtest);
+    */
 }
 
 uint8_t initeeprom(void)

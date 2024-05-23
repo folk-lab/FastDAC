@@ -19,12 +19,13 @@
 //#include <SPI.h>
 #include "src/PID/PID_v1.h" // Our own 'fork' of https://github.com/br3ttb/Arduino-PID-Library/
 //#include <vector>
+#include "stm32h7xx_hal.h"
+#include "stm32h7xx_ll_gpio.h"
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" 
 #include "FastDACeeprom.h"
 #include "mbed.h"
 #include "rtos.h"
-#include "mbed/events/include/events/mbed_events.h"
 #include "SDRAM.h"
 
 //using namespace mbed;
@@ -140,12 +141,25 @@ typedef struct ARGramp
 
 ARGramp *g_argramp[ARGMAXRAMPS];
 
-
 volatile uint32_t g_numloops;
 volatile uint32_t g_loopcount;
 
 volatile bool g_nextloop = false;
 volatile bool g_sampleflag = false;
+
+volatile bool g_rsflag = false;
+volatile bool g_anyrsactive = false;
+
+typedef struct RSramp
+{
+  bool active;
+  float v1;
+  float v2;
+  uint32_t nSteps;
+  uint32_t stepcount;  
+}RSramp;
+
+RSramp g_rsramp[NUMDACCHANNELS];
 
 //PID Specific
 typedef struct PIDparam
@@ -176,13 +190,15 @@ PID pid0(&(g_pidparam[0].adcin), &(g_pidparam[0].dacout), &(g_pidparam[0].setpoi
 
 mbed::InterruptIn drdy_int(digitalPinToPinName(drdy));
 
+mbed::Ticker rs_timer;
+
 mbed::SPI adspi(digitalPinToPinName(mosi), digitalPinToPinName(miso), digitalPinToPinName(sck));
 
 mbed::DigitalOut dac0cs(digitalPinToPinName(dac0));
 mbed::DigitalOut dac1cs(digitalPinToPinName(dac1));
 mbed::DigitalOut adccs(digitalPinToPinName(adc));
-events::EventQueue queue(32 * EVENTS_EVENT_SIZE);
-rtos::Thread pidThread;
+//events::EventQueue queue(32 * EVENTS_EVENT_SIZE);
+//rtos::Thread pidThread;
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
 typedef enum SPI_select {spiADC, spiDAC} SPI_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
@@ -195,10 +211,13 @@ void setup()
   dac0cs = 1;
   dac1cs = 1;
   adccs = 1;
+
   pinMode(slave_master, OUTPUT); //low for master, high for slave
   digitalWrite(slave_master, LOW);
+
   pinMode(adc_trig_out, OUTPUT); //active-high ADC trigger output, starts the sampling
   digitalWrite(adc_trig_out, HIGH);
+
   pinMode(adc_trig_in, INPUT); //active-low ADC trigger input, for diagnostics
   
   pinMode(clock_lol, INPUT); //active-high loss-of-lock signal from clock PLL
@@ -209,12 +228,11 @@ void setup()
   digitalWrite(ext_clock_led, LOW);
   
   pinMode(ldac0,OUTPUT);
-  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.  
-
+  digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
   pinMode(ldac1,OUTPUT);
   digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
 
-  pinMode(reset, OUTPUT);
+  pinMode(reset, OUTPUT);  
   //pinMode(drdy, INPUT);  //Data ready pin for the ADC.
   pinMode(led, OUTPUT);  //Used for blinking indicator LED
   digitalWrite(led, HIGH);
@@ -230,18 +248,13 @@ void setup()
 
   spi_select(spiDAC);
   adspi.select();
+  //adspi.lock();
 	if(initeeprom() != 0)
   {
     SERIALPORT.println("ERROR Initializing EEPROM!");
   }
   
-	loaddaccals();
-	//Initialize saved DAC setpoints to 0
-  for(uint8_t i = 0; i < NUMDACCHANNELS; i++)
-  {
-    g_DACsetpoint[i] = 0;
-  }
-  loadadccals();
+
   //Add and remove interrupt once to decrease latency
   drdy_int.fall(&ramp_int);
   drdy_int.fall(NULL);
@@ -257,14 +270,31 @@ void setup()
   NVIC_SetPriority(USART2_IRQn, 0x00); //Set UART2 interrupt priority highest
   set_gpio_int_priorities(0x01); //Set gpio priority below UART2
   set_spi_int_priorities(0x02); //Set SPI interrupt priorities below gpio   
+    
+  //Change output pin speeds
+
+  set_gpio_speed();
+
+  loaddaccals();
+	//Initialize DAC setpoints to 0
+  for(uint8_t i = 0; i < NUMDACCHANNELS; i++)
+  {
+    DACintegersend(i, 0);
+    //g_DACsetpoint[i] = 0;
+    digitalWrite(ldac0, LOW);
+    digitalWrite(ldac1, LOW);  
+    digitalWrite(ldac0, HIGH);
+    digitalWrite(ldac1, HIGH);
+  }
+  loadadccals();
   
   //rtos::Thread pidThread;
-
-  pidThread.start(callback(&queue, &events::EventQueue::dispatch_forever));
-  pidThread.set_priority(osPriorityISR);
+  //pidThread.start(callback(&queue, &events::EventQueue::dispatch_forever));
+  //pidThread.set_priority(osPriorityISR);
   //print_interrupt_priorities();
   //SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]) + (16 * ARGMAXRAMPS));
 }
+
 void print_interrupt_priorities(void)
 {
   for(uint32_t i = 0; i < 150; i++)
@@ -303,6 +333,28 @@ void set_spi_int_priorities(uint32_t priority)
   NVIC_SetPriority(SPI4_IRQn, priority);
   NVIC_SetPriority(SPI5_IRQn, priority);
   NVIC_SetPriority(SPI6_IRQn, priority);  
+}
+
+void set_gpio_speed(void)
+{
+  LL_GPIO_SetPinSpeed(GPIOJ, LL_GPIO_PIN_8, LL_GPIO_SPEED_FREQ_LOW); //dac0-j8
+  LL_GPIO_SetPinSpeed(GPIOK, LL_GPIO_PIN_1, LL_GPIO_SPEED_FREQ_LOW); //dac1-k1
+  LL_GPIO_SetPinSpeed(GPIOK, LL_GPIO_PIN_2, LL_GPIO_SPEED_FREQ_LOW); //adc-k2
+  LL_GPIO_SetPinSpeed(GPIOG, LL_GPIO_PIN_13, LL_GPIO_SPEED_FREQ_LOW); //slave_master-g13
+  LL_GPIO_SetPinSpeed(GPIOI, LL_GPIO_PIN_11, LL_GPIO_SPEED_FREQ_LOW); //adc_trig_out-i11
+  LL_GPIO_SetPinSpeed(GPIOK, LL_GPIO_PIN_5, LL_GPIO_SPEED_FREQ_LOW); //clock_led-k5  
+  LL_GPIO_SetPinSpeed(GPIOK, LL_GPIO_PIN_4, LL_GPIO_SPEED_FREQ_LOW); //ext_clock_led-k4
+  LL_GPIO_SetPinSpeed(GPIOD, LL_GPIO_PIN_13, LL_GPIO_SPEED_FREQ_LOW); //ldac0-d13
+  LL_GPIO_SetPinSpeed(GPIOB, LL_GPIO_PIN_9, LL_GPIO_SPEED_FREQ_LOW); //ldac1-b9
+  LL_GPIO_SetPinSpeed(GPIOG, LL_GPIO_PIN_10, LL_GPIO_SPEED_FREQ_LOW); //reset-g10
+  LL_GPIO_SetPinSpeed(GPIOK, LL_GPIO_PIN_3, LL_GPIO_SPEED_FREQ_LOW); //data-k3
+  LL_GPIO_SetPinSpeed(GPIOG, LL_GPIO_PIN_13, LL_GPIO_SPEED_FREQ_LOW); //slave_master-g13
+  LL_GPIO_SetPinSpeed(GPIOJ, LL_GPIO_PIN_10, LL_GPIO_SPEED_FREQ_LOW); //testpin
+  LL_GPIO_SetPinSpeed(GPIOB, LL_GPIO_PIN_3, LL_GPIO_SPEED_FREQ_LOW); //SCK-b13
+  LL_GPIO_SetPinSpeed(GPIOD, LL_GPIO_PIN_7, LL_GPIO_SPEED_FREQ_LOW); //MOSI-d7
+  LL_GPIO_SetPinSpeed(GPIOD, LL_GPIO_PIN_5, LL_GPIO_SPEED_FREQ_LOW); //TX-d5
+  LL_GPIO_SetPinSpeed(GPIOB, LL_GPIO_PIN_11, LL_GPIO_SPEED_FREQ_LOW); //SDA-b11
+  LL_GPIO_SetPinSpeed(GPIOH, LL_GPIO_PIN_4, LL_GPIO_SPEED_FREQ_LOW); //SCL-h4
 }
 ////////////////
 //// ROUTER ////
@@ -379,16 +431,25 @@ void loop()
     digitalWrite(clock_led, HIGH);
     digitalWrite(ext_clock_led, HIGH);
   }
+
   if(query_serial(&incommand))
   {
-    router(&incommand);    
+    router(&incommand);
+  }
+  if(g_pidparam[0].trig)
+  {
+    pid_event();
+  }
+  if(g_rsflag)
+  {
+    rs_event();
   }
 }
 
 void router(InCommand *incommand)
 {
   char * cmd = incommand->token[0];
-  digitalWrite(testpin, HIGH);
+  //digitalWrite(testpin, HIGH);
   if(strcmp("*IDN?", cmd) == 0)
   {
     idn();
@@ -397,208 +458,214 @@ void router(InCommand *incommand)
   {
     rdy();
   }
-  else if(strcmp("RESET", cmd) == 0)
-  {
-    resetADC();
-  }
   else if(strcmp("GET_DAC", cmd) == 0)
   {
     get_dac(incommand);
-  }
-  else if(strcmp("GET_ADC", cmd) == 0)
-  {
-    get_adc(incommand);
   }
   else if(strcmp("RAMP_SMART", cmd) == 0)
   {  
     ramp_smart(incommand);
   }
-  else if(strcmp("INT_RAMP", cmd) == 0)  
-  {  
-    int_ramp(incommand);
-  }
-  else if(strcmp("INT_ARG_RAMP", cmd) == 0)  
-  {  
-    int_arg_ramp(incommand);
-  }  
-  else if(strcmp("SPEC_ANA", cmd) == 0)  
-  {  
-    spec_ana(incommand);
-  }
-  else if(strcmp("CONVERT_TIME", cmd) == 0)  
-  {  
-    convert_time(incommand);
-  }
-  else if(strcmp("READ_CONVERT_TIME", cmd) == 0)
-  {  
-    read_convert_time(incommand);
-  }
-  else if(strcmp("CAL_ADC_WITH_DAC", cmd) == 0)  
-  {  
-    cal_adc_with_dac(incommand);
-  }
-  else if(strcmp("ADC_ZERO_SC_CAL", cmd) == 0)
-  {  
-    adc_zero_sc_cal(incommand);
-  }
-  else if(strcmp("ADC_CH_ZERO_SC_CAL", cmd) == 0)
+  else if(strcmp("STOP", cmd) == 0)
   {
-    adc_ch_zero_sc_cal(incommand);        
+    ramp_stop(incommand);
   }
-  else if(strcmp("ADC_CH_FULL_SC_CAL", cmd) == 0)
-  {  
-    adc_ch_full_sc_cal(incommand);
-  }
-  else if(strcmp("READ_ADC_CAL", cmd) == 0)  
-  {  
-    read_adc_cal(incommand);
-  }
-  else if(strcmp("WRITE_ADC_CAL", cmd) == 0)  
-  {  
-    write_adc_cal(incommand);
-  }
-  else if(strcmp("DAC_OFFSET_ADJ", cmd) == 0)  
-  {  
-    dac_offset_adj(incommand);
-  }
-  else if(strcmp("DAC_GAIN_ADJ", cmd) == 0)  
-  {  
-    dac_gain_adj(incommand);
-  }
-  else if(strcmp("DAC_RESET_CAL", cmd) == 0)  
-  {  
-    dac_reset_cal(incommand);
-  }
-  else if(strcmp("DEFAULT_CAL", cmd) == 0)  
-  {  
-    default_cal(incommand);
-  }
-  else if(strcmp("FULL_SCALE", cmd) == 0)  
-  {  
-    full_scale(incommand);
-  }
-  else if(strcmp("SET_MODE", cmd) == 0)  
-  {  
-    set_mode(incommand);
-  }
-  else if(strcmp("ARM_SYNC", cmd) == 0)  
-  {  
-    arm_sync(incommand);
-  }
-  else if(strcmp("DISARM_SYNC", cmd) == 0)
-  {  
-    disarm_sync(incommand);
-  }
-  else if(strcmp("CHECK_SYNC", cmd) == 0)  
-  {  
-    check_sync(incommand);
-  }
-  else if(strcmp("ADD_WAVE", cmd) == 0)  
-  {  
-    add_wave(incommand);
-  }
-  else if(strcmp("CLR_WAVE", cmd) == 0)  
-  {  
-    clr_wave(incommand);
-  }
-  else if(strcmp("CHECK_WAVE", cmd) == 0)  
-  { 
-    check_wave(incommand);
-  }
-  else if(strcmp("ADD_RAMP", cmd) == 0)  
-  {  
-    add_ramp(incommand);
-  }
-  else if(strcmp("ADD_RAMP_RAW", cmd) == 0)  
-  {  
-    add_ramp_raw(incommand);
-  }
-  else if(strcmp("CLR_RAMP", cmd) == 0)  
-  {  
-    clr_ramp(incommand);
-  }
-  else if(strcmp("CHECK_RAMP", cmd) == 0)  
-  {  
-    check_ramp(incommand);
-  }
-  else if(strcmp("CHECK_RAMP_CRC", cmd) == 0)  
-  {  
-    check_ramp_crc(incommand);
-  }
-  else if(strcmp("AWG_RAMP", cmd) == 0)  
-  {  
-    awg_ramp(incommand);
-  }
-  else if(strcmp("AWG_ARG_RAMP", cmd) == 0)  
-  {  
-    awg_arg_ramp(incommand);
-  }  
   else if(strcmp("START_PID", cmd) == 0)
-  {  
-    start_pid(incommand);    
+  {
+    start_pid(incommand);
   }
-  else if(strcmp("STOP_PID", cmd) == 0)  
-  {  
+  else if (strcmp("STOP_PID", cmd) == 0)
+  {
     stop_pid(incommand);
   }
-  else if(strcmp("SET_PID_TUNE", cmd) == 0)
-  {  
+  else if (strcmp("SET_PID_TUNE", cmd) == 0)
+  {
     set_pid_tune(incommand);
   }
-  else if(strcmp("SET_PID_SETP", cmd) == 0)
-  {  
+  else if (strcmp("SET_PID_SETP", cmd) == 0)
+  {
     set_pid_setp(incommand);
   }
-  else if(strcmp("SET_PID_LIMS", cmd) == 0)
-  {  
+  else if (strcmp("SET_PID_LIMS", cmd) == 0)
+  {
     set_pid_lims(incommand);
   }
-  else if(strcmp("SET_PID_DIR", cmd) == 0)
-  {  
+  else if (strcmp("SET_PID_DIR", cmd) == 0)
+  {
     set_pid_dir(incommand);
   }
-  else if(strcmp("SET_PID_SLEW", cmd) == 0)
-  {  
-    set_pid_slew(incommand);   
+  else if (strcmp("SET_PID_SLEW", cmd) == 0)
+  {
+    set_pid_slew(incommand);
   }
-  else if(strcmp("EEPROM_TEST", cmd) == 0)
-  {  
-    eeprom_test(incommand);
-  }
-  else if(strcmp("WRITE_ID_EEPROM", cmd) == 0)
-  {  
-    write_id_eeprom(incommand);
-  }
-	else if(strcmp("WRITE_DAC_CAL_EEPROM", cmd) == 0)
-  {  
-    write_dac_cal_eeprom(incommand);
-  }
-  else if(strcmp("READ_DAC_CAL_EEPROM", cmd) == 0)
-  {  
-    read_dac_cal_eeprom(incommand);
-  }
-  else if(strcmp("WRITE_ADC_CAL_EEPROM", cmd) == 0)
-  {  
-    write_adc_cal_eeprom(incommand);
-  }
-  else if(strcmp("READ_ADC_CAL_EEPROM", cmd) == 0)
-  {  
-    read_adc_cal_eeprom(incommand);
-  }
-  else if(strcmp("INIT_ALL_EEPROM_VALUES", cmd) == 0)
-  {  
-    init_all_eeprom_values(incommand);
-  }
-  else if(strcmp("CAL_ALL_ADC_EEPROM_WITH_DAC", cmd) == 0)
-  {  
-    cal_all_adc_eeprom_with_dac(incommand);
-  }
-  
+  else if((g_pidparam[0].active == false) && (g_anyrsactive == false))
+  {
+    if(strcmp("GET_ADC", cmd) == 0)
+    {
+      get_adc(incommand);
+    }
+    else if(strcmp("RESET", cmd) == 0)
+    {
+    resetADC();
+    }
+    else if(strcmp("INT_RAMP", cmd) == 0)  
+    {  
+      int_ramp(incommand);
+    }
+    else if(strcmp("INT_ARG_RAMP", cmd) == 0)  
+    {  
+      int_arg_ramp(incommand);
+    }  
+    else if(strcmp("SPEC_ANA", cmd) == 0)  
+    {  
+      spec_ana(incommand);
+    }
+    else if(strcmp("CONVERT_TIME", cmd) == 0)  
+    {  
+      convert_time(incommand);
+    }
+    else if(strcmp("READ_CONVERT_TIME", cmd) == 0)
+    {  
+      read_convert_time(incommand);
+    }
+    else if(strcmp("CAL_ADC_WITH_DAC", cmd) == 0)  
+    {  
+      cal_adc_with_dac(incommand);
+    }
+    else if(strcmp("ADC_ZERO_SC_CAL", cmd) == 0)
+    {  
+      adc_zero_sc_cal(incommand);
+    }
+    else if(strcmp("ADC_CH_ZERO_SC_CAL", cmd) == 0)
+    {
+      adc_ch_zero_sc_cal(incommand);        
+    }
+    else if(strcmp("ADC_CH_FULL_SC_CAL", cmd) == 0)
+    {  
+      adc_ch_full_sc_cal(incommand);
+    }
+    else if(strcmp("READ_ADC_CAL", cmd) == 0)  
+    {  
+      read_adc_cal(incommand);
+    }
+    else if(strcmp("WRITE_ADC_CAL", cmd) == 0)  
+    {  
+      write_adc_cal(incommand);
+    }
+    else if(strcmp("DAC_OFFSET_ADJ", cmd) == 0)  
+    {  
+      dac_offset_adj(incommand);
+    }
+    else if(strcmp("DAC_GAIN_ADJ", cmd) == 0)  
+    {  
+      dac_gain_adj(incommand);
+    }
+    else if(strcmp("DAC_RESET_CAL", cmd) == 0)  
+    {  
+      dac_reset_cal(incommand);
+    }
+    else if(strcmp("DEFAULT_CAL", cmd) == 0)  
+    {  
+      default_cal(incommand);
+    }
+    else if(strcmp("FULL_SCALE", cmd) == 0)  
+    {  
+      full_scale(incommand);
+    }
+    else if(strcmp("SET_MODE", cmd) == 0)  
+    {  
+      set_mode(incommand);
+    }
+    else if(strcmp("ARM_SYNC", cmd) == 0)  
+    {  
+      arm_sync(incommand);
+    }
+    else if(strcmp("DISARM_SYNC", cmd) == 0)
+    {  
+      disarm_sync(incommand);
+    }
+    else if(strcmp("CHECK_SYNC", cmd) == 0)  
+    {  
+      check_sync(incommand);
+    }
+    else if(strcmp("ADD_WAVE", cmd) == 0)  
+    {  
+      add_wave(incommand);
+    }
+    else if(strcmp("CLR_WAVE", cmd) == 0)  
+    {  
+      clr_wave(incommand);
+    }
+    else if(strcmp("CHECK_WAVE", cmd) == 0)  
+    { 
+      check_wave(incommand);
+    }
+    else if(strcmp("ADD_RAMP", cmd) == 0)  
+    {  
+      add_ramp(incommand);
+    }
+    else if(strcmp("ADD_RAMP_RAW", cmd) == 0)  
+    {  
+      add_ramp_raw(incommand);
+    }
+    else if(strcmp("CLR_RAMP", cmd) == 0)  
+    {  
+      clr_ramp(incommand);
+    }
+    else if(strcmp("CHECK_RAMP", cmd) == 0)  
+    {  
+      check_ramp(incommand);
+    }
+    else if(strcmp("CHECK_RAMP_CRC", cmd) == 0)  
+    {  
+      check_ramp_crc(incommand);
+    }
+    else if(strcmp("AWG_RAMP", cmd) == 0)  
+    {  
+      awg_ramp(incommand);
+    }
+    else if(strcmp("AWG_ARG_RAMP", cmd) == 0)  
+    {  
+      awg_arg_ramp(incommand);
+    }
+    else if(strcmp("EEPROM_TEST", cmd) == 0)
+    {  
+      eeprom_test(incommand);
+    }
+    else if(strcmp("WRITE_ID_EEPROM", cmd) == 0)
+    {  
+      write_id_eeprom(incommand);
+    }
+    else if(strcmp("WRITE_DAC_CAL_EEPROM", cmd) == 0)
+    {  
+      write_dac_cal_eeprom(incommand);
+    }
+    else if(strcmp("READ_DAC_CAL_EEPROM", cmd) == 0)
+    {  
+      read_dac_cal_eeprom(incommand);
+    }
+    else if(strcmp("WRITE_ADC_CAL_EEPROM", cmd) == 0)
+    {  
+      write_adc_cal_eeprom(incommand);
+    }
+    else if(strcmp("READ_ADC_CAL_EEPROM", cmd) == 0)
+    {  
+      read_adc_cal_eeprom(incommand);
+    }
+    else if(strcmp("INIT_ALL_EEPROM_VALUES", cmd) == 0)
+    {  
+      init_all_eeprom_values(incommand);
+    }
+    else if(strcmp("CAL_ALL_ADC_EEPROM_WITH_DAC", cmd) == 0)
+    {  
+      cal_all_adc_eeprom_with_dac(incommand);
+    }
+  }    
   else
   {
     SERIALPORT.println("NOP");
   }
-  digitalWrite(testpin, LOW);
+  //digitalWrite(testpin, LOW);
 	//SERIALPORT.print(F("Free RAM = "));
   //SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
 }
@@ -611,6 +678,7 @@ void spi_select(SPI_select select)
   {
     adspi.format(8, 3);
     adspi.frequency(5000000); //5MHz gives 3.75MHz, bug
+    //adspi.frequency(10000000); //10MHz gives 7.5MHz     
     select_saved = spiADC;
   }
   if((select == spiDAC) && (select_saved != spiDAC))
@@ -619,6 +687,8 @@ void spi_select(SPI_select select)
     adspi.frequency(20000000); //20MHz gives 15MHz, bug
     select_saved = spiDAC;
   }
+  //LL_GPIO_SetPinSpeed(GPIOB, LL_GPIO_PIN_3, LL_GPIO_SPEED_FREQ_LOW); //SCK
+  //LL_GPIO_SetPinSpeed(GPIOD, LL_GPIO_PIN_7, LL_GPIO_SPEED_FREQ_LOW); //MOSI
 }
 
 ///////////////////
@@ -817,14 +887,20 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
     return;
   }
   float initial = readDAC(dacChannel);  //mV
-
+  if(g_rsramp[dacChannel].active)
+  {
+    SERIALPORT.print("RAMP_ACTIVE,")
+    SERIALPORT.println(dacChannel);
+    return;
+  }
   send_ack();
   if (abs(setpoint-initial) < 0.0001)  //If already at setpoint
   {
-    SERIALPORT.println("RAMP_FINISHED");
+    SERIALPORT.print("RAMP_FINISHED,");
+    SERIALPORT.println(dacChannel);
     return;
   }
-  // Calc ramprate, make vector string, pass to autoRamp1
+  // Calc ramprate, pass to autoRamp1
   uint32_t nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
   if (nSteps < 5)
   {
@@ -841,11 +917,91 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
   SERIALPORT.println(nSteps);
 #endif
   autoRamp1(initial, setpoint, nSteps, dacChannel, 1000, incommand);
-  SERIALPORT.println("RAMP_FINISHED");
-
   return;
 }
 
+void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period, InCommand *incommand)
+// voltage in mV
+{
+  
+  #ifdef DEBUGRAMP  
+  SERIALPORT.print("v1: ");
+  SERIALPORT.println(v1);
+
+  SERIALPORT.print("v2: ");
+  SERIALPORT.println(v2);  
+  
+  SERIALPORT.print("nsteps: ");
+  SERIALPORT.println(nSteps);
+#endif
+  
+
+  
+  if(g_rsramp[dacChannel].active == false)
+  {
+    digitalWrite(data,HIGH);
+    g_rsramp[dacChannel].active = true;
+    g_rsramp[dacChannel].v1 = v1;
+    g_rsramp[dacChannel].v2 = v2;
+    g_rsramp[dacChannel].nSteps = nSteps;
+    g_rsramp[dacChannel].stepcount = 0;
+    rs_timer.attach_us(&rs_timeout, period);
+  }  
+    //Check for STOP command   
+  //  if(query_serial(incommand))
+  //  {
+  //    if(strcmp("STOP", incommand->token[0]) == 0)
+  //    {
+  //      break;
+  //    }
+  //  }
+  //}
+  //digitalWrite(data,LOW);
+}
+
+void rs_timeout(void)
+{
+  g_rsflag = true;
+}
+void rs_event(void)
+{
+  bool any_active = false;
+  for(uint8_t ch = 0; ch < NUMDACCHANNELS; ch++)
+  {
+    if(g_rsramp[ch].active)
+    {
+      any_active = true;
+      if(g_rsramp[ch].stepcount < g_rsramp[ch].nSteps)
+      {
+        float setpoint = (g_rsramp[ch].v1 + (g_rsramp[ch].v2 - g_rsramp[ch].v1) * g_rsramp[ch].stepcount/(g_rsramp[ch].nSteps-1));
+        //make sure within range
+        if(setpoint > g_dac_full_scale * 1000.0)
+        {
+          setpoint = g_dac_full_scale * 1000.0;
+        }
+        else if(setpoint < g_dac_full_scale * -1000.0)
+        {
+          setpoint = g_dac_full_scale * -1000.0;
+        }
+        writeDAC(ch, setpoint, true); // takes mV
+        //SERIALPORT.println(v1+(v2-v1)*j/(nSteps-1));
+        g_rsramp[ch].stepcount++;
+      }
+      else
+      {
+        SERIALPORT.print("RAMP_FINISHED,");
+        SERIALPORT.println(ch);
+        g_rsramp[ch].active = false;
+      }
+    }
+  }
+  if(!any_active)
+  {
+    rs_timer.detach();    
+  }
+  g_anyrsactive = any_active;
+  g_rsflag = false;
+}
 
 ////////////////////////////
 //// PID Correction    ////
@@ -858,7 +1014,7 @@ void start_pid(InCommand *incommand)
   {
     return;
   }
-  
+  g_pidparam[0].active = true;
   g_pidparam[0].dacout = readDAC(g_pidparam[0].DACchan);//Start from current dac setpoint
   g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
   
@@ -890,30 +1046,30 @@ void start_pid(InCommand *incommand)
   adspi.write(ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
   adccs = 1;
   //drdy_int.fall(queue.event(&pidint));
-  adspi.unlock();  
-  drdy_int.fall(pidint);
-  delayMicroseconds(100);  
+  drdy_int.fall(pid_int);
+  //delayMicroseconds(100);  
   //attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
 
   
 }
-void pidint(void)
+void pid_int(void)
 {
-  queue.call(pidevent);
+  //queue.call(pidevent);  //using event queues can have up to 1ms latency
+  g_pidparam[0].trig = true;
 }
 //PID Interrupts every ADC sample
-void pidevent(void)
+void pid_event(void)
 {  
   uint8_t b1, b2;
   int decimal;
-  adspi.lock();
+  g_pidparam[0].trig = false;  
+  //adspi.lock();
   spi_select(spiADC);
   adccs = 0;
   adspi.write(ADC_CHDATA | ADC_REGREAD | g_pidparam[0].ADCchan); //Read channel data register
   b1 = adspi.write(0); // Read first byte
   b2 = adspi.write(0); // Read second byte
   adccs = 1;
-  adspi.unlock();
   decimal = twoByteToInt(b1, b2);
   g_pidparam[0].adcin = map2(decimal, 0, 65536, -10000.0, 10000.0);
     
@@ -931,9 +1087,9 @@ void pidevent(void)
     {
       g_pidparam[0].dacoutlim = g_pidparam[0].dacout;
     }
-    adspi.lock();
+
     writeDAC(g_pidparam[0].DACchan, g_pidparam[0].dacoutlim, true);
-    adspi.unlock();
+
     g_pidparam[0].loopcount++;
     if(g_pidparam[0].loopcount >= 10)
     {
@@ -952,7 +1108,6 @@ void pidevent(void)
     }
     
   }
-  
 }
 
 //Stop PID, no inputs params, just stops 
@@ -975,7 +1130,7 @@ void stop_pid(InCommand * incommand)
   adspi.write(ADC_MODE_IDLE);  //Set ADC to idle
   }
   adccs = 1;
-
+  g_pidparam[0].active = false;
   send_ack();
 }
 //SET_PID_TUNE,<P-coeff>,<I-coeff>,<D-coeff>
@@ -1860,59 +2015,6 @@ void resetADC()
 
 //// DAC UTIL ////
 
-
-
-void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period, InCommand *incommand)
-// voltage in mV
-{
-  
-  #ifdef DEBUGRAMP  
-  SERIALPORT.print("v1: ");
-  SERIALPORT.println(v1);
-
-  SERIALPORT.print("v2: ");
-  SERIALPORT.println(v2);  
-  
-  SERIALPORT.print("nsteps: ");
-  SERIALPORT.println(nSteps);
-#endif
-  
-  digitalWrite(data,HIGH);
-  uint32_t timer = micros();
-  uint32_t j = 0;
-  while(j < nSteps)
-  {
-    uint32_t nowmicros = micros();
-    digitalWrite(data, HIGH);
-    if((nowmicros - timer) > period)//Time to take another step
-    {
-      timer = nowmicros;
-      float setpoint = (v1+(v2-v1)*j/(nSteps-1));
-      //make sure within range
-      if(setpoint > g_dac_full_scale * 1000.0)
-      {
-        setpoint = g_dac_full_scale * 1000.0;
-      }
-      else if(setpoint < g_dac_full_scale * -1000.0)
-      {
-        setpoint = g_dac_full_scale * -1000.0;
-      }
-      writeDAC(dacChannel, setpoint, true); // takes mV
-      //SERIALPORT.println(v1+(v2-v1)*j/(nSteps-1));
-      j++;
-    }
-    //Check for STOP command   
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)
-      {
-        break;
-      }
-    }
-  }
-  digitalWrite(data,LOW);
-}
-
 float writeDAC(uint8_t dacChannel, float voltage, bool load)
 // voltage in mV
 {
@@ -1959,7 +2061,6 @@ void DACintegersend(byte ch, int16_t value)
     send_buff[0] = DAC_DATA | ch;
     send_buff[1] = (char)(value >> 8);
     send_buff[2] = (char)(value & 0xff);
-
     spi_select(spiDAC);         
     dac0cs = 0;
     adspi.write(send_buff, 3, recv_buff, 3);
@@ -1973,7 +2074,6 @@ void DACintegersend(byte ch, int16_t value)
     send_buff[0] = DAC_DATA | ch;
     send_buff[1] = (char)(value >> 8);
     send_buff[2] = (char)(value & 0xff);
-    
     spi_select(spiDAC);  
     dac1cs = 0;
     adspi.write(send_buff, 3, recv_buff, 3);
@@ -3146,7 +3246,7 @@ void ramp_int(void)//interrupt for ramp, called when ADC samples are ready
   digitalWrite(ldac1, HIGH);
   g_sampleflag = true;  
   //queue.call(ramp_event);
-  drdy_int.fall(NULL);//disable interrupt temporarily to prevent re-entering immediately
+  //drdy_int.fall(NULL);//disable interrupt temporarily to prevent re-entering immediately
 }
 
 void ramp_event(void)//event for ramp
@@ -3177,7 +3277,7 @@ void ramp_event(void)//event for ramp
           adspi.write(ADC_CHDATA | ADC_REGREAD | g_ADCchanselect[i]); //Read channel data register
           SERIALPORT.write(adspi.write(0)); // Read/write first byte
           SERIALPORT.write(adspi.write(0)); // Read/write second byte
-          adccs = 1;          
+          adccs = 1;
         }
       }
       if(g_numwaves == 0)
@@ -3257,8 +3357,8 @@ void ramp_event(void)//event for ramp
         }
       }
    //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING); //reattach if not done
-   drdy_int.fall(&ramp_int);
    g_sampleflag = false;
+   //drdy_int.fall(&ramp_int);
    }
 }
 
