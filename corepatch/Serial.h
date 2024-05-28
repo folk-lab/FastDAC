@@ -24,6 +24,7 @@
 #include "Arduino.h"
 #include "api/HardwareSerial.h"
 #include "PinNames.h"
+#include "stm32h7xx_ll_gpio.h"
 #include <platform/FileHandle.h>
 
 #ifdef __cplusplus
@@ -68,6 +69,7 @@ class UART : public HardwareSerial {
 
 	private:
 		void on_rx();
+		void tx_empty();
 		void block_tx(int);
 		bool _block;
 		// See https://github.com/ARMmbed/mbed-os/blob/f5b5989fc81c36233dbefffa1d023d1942468d42/targets/TARGET_NORDIC/TARGET_NRF5x/TARGET_NRF52/serial_api.c#L76
@@ -76,8 +78,10 @@ class UART : public HardwareSerial {
 		mbed_usb_serial* _usb_serial = NULL;
 		PinName _tx, _rx, _rts, _cts;
 		//RingBufferN<256> rx_buffer;
-		RingBufferN<SERIAL_BUFFER_SIZE> rx_buffer;
-		uint8_t intermediate_buf[4];
+		//RingBufferN<TX_SERIAL_BUFFER_SIZE> tx_buffer;
+		RingBufferN<TX_SERIAL_BUFFER_SIZE> tx_buffer;
+		RingBufferN<RX_SERIAL_BUFFER_SIZE> rx_buffer;
+		//uint8_t intermediate_buf[4];
 		bool is_usb = false;
 };
 }

@@ -21,6 +21,7 @@
 //#include <vector>
 #include "stm32h7xx_hal.h"
 #include "stm32h7xx_ll_gpio.h"
+#include "stm32h7xx_ll_spi.h"
 #include "FastDACdefs.h"
 #include "FastDACcalibration.h" 
 #include "FastDACeeprom.h"
@@ -74,9 +75,6 @@ const int dac0 = 4; //The SPI pin for the DAC0
 const int dac1 = 10; //The SPI pin for the DAC1
 const int ldac0=6; //Load DAC1 pin for DAC1. Make it LOW if not in use.
 const int ldac1=9; //Load DAC2 pin for DAC1. Make it LOW if not in use.
-//Pio *ldac_port = digitalPinToPort(ldac0); //ldac0 and ldac1 share the same port, so they can be toggled simultaneously
-//const uint32_t ldac0_mask = digitalPinToBitMask(ldac0);
-//const uint32_t ldac1_mask = digitalPinToBitMask(ldac1);
 
 const int reset=44 ; //Reset on ADC
 const int drdy=48; // Data is ready pin on ADC
@@ -248,7 +246,19 @@ void setup()
 
   spi_select(spiDAC);
   adspi.select();
-  //adspi.lock();
+  adspi.lock();
+  //LL_SPI_SetInterDataIdleness(SPI1, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetMasterSSIdleness(SPI1, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetInterDataIdleness(SPI2, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetMasterSSIdleness(SPI2, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetInterDataIdleness(SPI3, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetMasterSSIdleness(SPI3, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetInterDataIdleness(SPI4, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetMasterSSIdleness(SPI4, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetInterDataIdleness(SPI5, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetMasterSSIdleness(SPI5, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetInterDataIdleness(SPI6, LL_SPI_ID_IDLENESS_00CYCLE);
+  //LL_SPI_SetMasterSSIdleness(SPI6, LL_SPI_ID_IDLENESS_00CYCLE);
 	if(initeeprom() != 0)
   {
     SERIALPORT.println("ERROR Initializing EEPROM!");
@@ -268,6 +278,7 @@ void setup()
   }
   set_all_int_priorities(DEFAULT_INT_PRI); //Set all priorites to something lower than highest
   NVIC_SetPriority(USART2_IRQn, 0x00); //Set UART2 interrupt priority highest
+
   set_gpio_int_priorities(0x01); //Set gpio priority below UART2
   set_spi_int_priorities(0x02); //Set SPI interrupt priorities below gpio   
     
@@ -288,6 +299,7 @@ void setup()
   }
   loadadccals();
   
+  //print_interrupt_active();
   //rtos::Thread pidThread;
   //pidThread.start(callback(&queue, &events::EventQueue::dispatch_forever));
   //pidThread.set_priority(osPriorityISR);
@@ -295,9 +307,30 @@ void setup()
   //SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]) + (16 * ARGMAXRAMPS));
 }
 
+//disable or enable RTOS interrupts
+void critical_section(bool activate)
+{
+  if(activate)
+  {
+    NVIC_DisableIRQ(SysTick_IRQn);
+    //NVIC_DisableIRQ(TIM5_IRQn);
+    NVIC_DisableIRQ(LPTIM4_IRQn);
+    NVIC_DisableIRQ(OTG_FS_IRQn);    
+    //NVIC_DisableIRQ(MDMA_IRQn);
+  }
+  else
+  {
+    NVIC_EnableIRQ(SysTick_IRQn); 
+    //NVIC_EnableIRQ(TIM5_IRQn);
+    NVIC_EnableIRQ(LPTIM4_IRQn);  
+    NVIC_EnableIRQ(OTG_FS_IRQn); 
+    //NVIC_EnableIRQ(MDMA_IRQn); 
+  }
+}
+
 void print_interrupt_priorities(void)
 {
-  for(uint32_t i = 0; i < 150; i++)
+  for(uint32_t i = 0; i <= GIGA_NUM_INTS; i++)
   {
     SERIALPORT.print("INT");
     SERIALPORT.print(i);
@@ -307,12 +340,30 @@ void print_interrupt_priorities(void)
   }
 }
 
+void print_interrupt_active(void)
+{
+  for(int32_t i = 0; i <= GIGA_NUM_INTS; i++)
+  {
+    if(NVIC_GetEnableIRQ((IRQn_Type)i))
+    {
+      SERIALPORT.print("INT");
+      SERIALPORT.print(i);
+      SERIALPORT.print(":ON,");      
+    }
+
+  }
+  //SERIALPORT.print("Systick:");  
+  //SERIALPORT.print(NVIC_GetEnableIRQ(SysTick_IRQn));
+  //SERIALPORT.print(",");
+}
+
 void set_all_int_priorities(uint32_t priority)
 {
   for(uint32_t i = 0; i <= GIGA_NUM_INTS; i++)
   {
     NVIC_SetPriority((IRQn_Type)i, priority);
   }
+  NVIC_SetPriority(SysTick_IRQn, priority);
 }
 
 void set_gpio_int_priorities(uint32_t priority)
@@ -660,6 +711,10 @@ void router(InCommand *incommand)
     {  
       cal_all_adc_eeprom_with_dac(incommand);
     }
+    else
+    {
+      SERIALPORT.println("NOP");
+    }
   }    
   else
   {
@@ -889,7 +944,7 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
   float initial = readDAC(dacChannel);  //mV
   if(g_rsramp[dacChannel].active)
   {
-    SERIALPORT.print("RAMP_ACTIVE,")
+    SERIALPORT.print("RAMP_ACTIVE,");
     SERIALPORT.println(dacChannel);
     return;
   }
@@ -1003,6 +1058,29 @@ void rs_event(void)
   g_rsflag = false;
 }
 
+//Stop any currently running ramps
+void ramp_stop(InCommand * incommand)
+{
+  if(incommand->paramcount != 1)//Check correct number of parameters
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
+  rs_timer.detach();
+  for(uint8_t ch = 0; ch < NUMDACCHANNELS; ch++)
+  {   
+    if(g_rsramp[ch].active)
+    {
+      SERIALPORT.print("RAMP_FINISHED,");
+      SERIALPORT.println(ch);
+      g_rsramp[ch].active = false;      
+    }
+  }    
+  g_anyrsactive = false;
+  g_rsflag = false;
+}
+
 ////////////////////////////
 //// PID Correction    ////
 ///////////////////////////
@@ -1045,12 +1123,8 @@ void start_pid(InCommand *incommand)
   adspi.write(ADC_IO); //Write to ADC IO register
   adspi.write(ADC_IO_RDYFN | ADC_IO_SYNC | ADC_IO_P1DIR); //Change RDY to only trigger when all channels complete, and start only when synced, P1 as input
   adccs = 1;
-  //drdy_int.fall(queue.event(&pidint));
-  drdy_int.fall(pid_int);
-  //delayMicroseconds(100);  
-  //attachInterrupt(digitalPinToInterrupt(drdy), pidint, FALLING);
-
-  
+  critical_section(true);
+  drdy_int.fall(pid_int);  
 }
 void pid_int(void)
 {
@@ -1117,7 +1191,7 @@ void stop_pid(InCommand * incommand)
   pid0.SetMode(MANUAL);
   drdy_int.fall(NULL);
   //detachInterrupt(digitalPinToInterrupt(drdy));
-  
+  critical_section(false);
   spi_select(spiADC);
   adccs = 0;
   adspi.write(ADC_IO); //Write to ADC IO register
@@ -2554,34 +2628,7 @@ void int_arg_ramp(InCommand *incommand)
     g_rampadcidle();
     return;
   }
-  digitalWrite(data,HIGH);
-
-  send_ack();//send ack and immediately attach interrupt
-  g_sampleflag = false;
-  drdy_int.fall(&ramp_int); 
-  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);  
-  //attachInterrupt(digitalPinToInterrupt(drdy), int_ramp_int, FALLING);  
-
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
-  while(!g_done)
-  {
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)      
-      {
-        break;
-      }     
-    }
-    if(g_sampleflag)
-    {
-      ramp_event();
-    }
-  }  
-  //detachInterrupt(digitalPinToInterrupt(drdy));
-  drdy_int.fall(NULL);
-  g_rampadcidle();
-  digitalWrite(data,LOW);
+  ramp_run(incommand);
   SERIALPORT.println("RAMP_FINISHED");
 }
 
@@ -2642,35 +2689,7 @@ void spec_ana(InCommand * incommand)
     g_rampadcidle();
     return;
   }
-  
-  digitalWrite(data,HIGH);
-  
-  send_ack();//send ack and immediately attach interrupt
-  g_sampleflag = false;
-  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
-  drdy_int.fall(&ramp_int);  
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
-  while(!g_done)
-  {
-    
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)      
-      {
-        break;
-      }     
-    }
-    if(g_sampleflag)
-    {
-      ramp_event();
-    }
-  }  
-  //detachInterrupt(digitalPinToInterrupt(drdy));
-  drdy_int.fall(NULL);
-  
-  g_rampadcidle();
-  digitalWrite(data,LOW);
+  ramp_run(incommand);
   SERIALPORT.println("READ_FINISHED");
 }
 
@@ -2829,34 +2848,7 @@ void awg_ramp(InCommand *incommand)
     g_rampadcidle();
     return;
   }
-  digitalWrite(data,HIGH);
-  
-  send_ack();//send ack and immediately attach interrupt  
-  g_sampleflag = false;
-  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
-  drdy_int.fall(&ramp_int);  
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
-  while(!g_done)
-  {
-    
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)      
-      {
-        break;
-      }     
-    }
-    if(g_sampleflag)
-    {
-      ramp_event();
-    }
-  }  
-  //detachInterrupt(digitalPinToInterrupt(drdy));
-  drdy_int.fall(NULL);
-  
-  g_rampadcidle();
-  digitalWrite(data,LOW);
+  ramp_run(incommand);
   SERIALPORT.println("RAMP_FINISHED");
 }
 
@@ -3070,35 +3062,7 @@ void awg_arg_ramp(InCommand *incommand)
     g_rampadcidle();
     return;
   }
-  digitalWrite(data,HIGH);
-  
-  send_ack();//send ack and immediately attach interrupt  
-  g_sampleflag = false;
-  //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
-  drdy_int.fall(&ramp_int);  
-  digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
-  while(!g_done)
-  {
-    
-    if(query_serial(incommand))
-    {
-      if(strcmp("STOP", incommand->token[0]) == 0)      
-      {
-        break;
-      }     
-    }
-    if(g_sampleflag)
-    {
-      ramp_event();
-    }
-  }  
-  //detachInterrupt(digitalPinToInterrupt(drdy));
-  drdy_int.fall(NULL);
-  
-  
-  g_rampadcidle();
-  digitalWrite(data,LOW);
+  ramp_run(incommand);
   SERIALPORT.println("RAMP_FINISHED");
 }
 
@@ -3206,14 +3170,21 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
     g_rampadcidle();
     return;
   }
+  ramp_run(incommand);
+  SERIALPORT.println("RAMP_FINISHED");
+}
+
+void ramp_run(InCommand * incommand)
+{
   digitalWrite(data,HIGH);
 
   send_ack();//send ack and immediately attach interrupt
   g_sampleflag = false;
   //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING);
+  critical_section(true);  
   drdy_int.fall(&ramp_int);  
   digitalWrite(adc_trig_out, HIGH); //send sync signal (only matters on master)
-  
+ 
   
   while(!g_done)
   {
@@ -3229,13 +3200,13 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
     {
       ramp_event();
     }
-  }  
+  }
+
   //detachInterrupt(digitalPinToInterrupt(drdy));
   drdy_int.fall(NULL);
-  
+  critical_section(false); 
   g_rampadcidle();
   digitalWrite(data,LOW);
-  SERIALPORT.println("RAMP_FINISHED");
 }
 
 void ramp_int(void)//interrupt for ramp, called when ADC samples are ready
@@ -3244,15 +3215,14 @@ void ramp_int(void)//interrupt for ramp, called when ADC samples are ready
   digitalWrite(ldac1, LOW);  
   digitalWrite(ldac0, HIGH);
   digitalWrite(ldac1, HIGH);
-  g_sampleflag = true;  
-  //queue.call(ramp_event);
-  //drdy_int.fall(NULL);//disable interrupt temporarily to prevent re-entering immediately
+  g_sampleflag = true;
 }
 
 void ramp_event(void)//event for ramp
 {
    uint32_t i, j;
    //detachInterrupt(digitalPinToInterrupt(drdy));// temporarily detach interrupt    
+   g_sampleflag = false;
    if(!g_done)
    {
       if(g_firstsamples)
@@ -3356,9 +3326,6 @@ void ramp_event(void)//event for ramp
           }                  
         }
       }
-   //attachInterrupt(digitalPinToInterrupt(drdy), ramp_int, FALLING); //reattach if not done
-   g_sampleflag = false;
-   //drdy_int.fall(&ramp_int);
    }
 }
 
@@ -3524,6 +3491,7 @@ void add_ramp_raw(InCommand *incommand)
     SERIALPORT.println(ARGMAXSETPOINTS);
     return;
   }
+  digitalWrite(data, HIGH);
   send_ack();
   uint32_t setpoints_received = 0;
   uint32_t previous_millis = millis();
@@ -3547,6 +3515,7 @@ void add_ramp_raw(InCommand *incommand)
   }
   
   g_argramp[rampnumber]->numsetpoints += setpoints_received;
+  digitalWrite(data, LOW);
   SERIALPORT.print("RAMP,");
   SERIALPORT.print(rampnumber);
   SERIALPORT.print(",");
