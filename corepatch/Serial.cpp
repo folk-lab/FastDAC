@@ -167,9 +167,9 @@ void UART::tx_empty() {
 	if(tx_buffer.available())
 	{
 		c = tx_buffer.read_char();
-		LL_USART_TransmitData8(USART2, c);		
-		//while (!_serial->obj->writeable()) {}
-		//_serial->obj->write(&c, 1);
+		//LL_USART_TransmitData8(USART2, c);		
+		while (!_serial->obj->writeable()) {}
+		_serial->obj->write(&c, 1);
 	}
 	else
 	{

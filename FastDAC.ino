@@ -198,7 +198,7 @@ mbed::DigitalOut adccs(digitalPinToPinName(adc));
 //events::EventQueue queue(32 * EVENTS_EVENT_SIZE);
 //rtos::Thread pidThread;
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
-typedef enum SPI_select {spiADC, spiDAC} SPI_select;
+typedef enum SPI_select {spiADC, spiDAC, UNDEF} SPI_select;
 MS_select g_ms_select = INDEP; //Master/Slave/Independent selection variable
 
 void setup()
@@ -243,7 +243,7 @@ void setup()
   delayMicroseconds(5000); // wait 5ms
   digitalWrite(reset,HIGH);
   digitalWrite(data,LOW);
-
+  init_spi();
   spi_select(spiDAC);
   adspi.select();
   adspi.lock();
@@ -681,7 +681,7 @@ void router(InCommand *incommand)
     }
     else if(strcmp("EEPROM_TEST", cmd) == 0)
     {  
-      eeprom_test(incommand);
+      //eeprom_test(incommand);
     }
     else if(strcmp("WRITE_ID_EEPROM", cmd) == 0)
     {  
@@ -725,25 +725,39 @@ void router(InCommand *incommand)
   //SERIALPORT.println(freeMemory(), DEC);  // print how much RAM is available.
 }
 
+void init_spi(void)
+{
+    adspi.format(8, 3);
+    adspi.frequency(5000000); //5MHz gives 3.75MHz, bug
+}
+
 //Selects the correct clock and data format for the SPI, saves previous state to avoid unnecessary switching delays
 void spi_select(SPI_select select)
 {
-  static SPI_select select_saved; //SPI slave selection, sets correct clock and polarity
+  static SPI_select select_saved = UNDEF; //SPI slave selection, sets correct clock and polarity
   if((select == spiADC) && (select_saved != spiADC))
   {
-    adspi.format(8, 3);
-    adspi.frequency(5000000); //5MHz gives 3.75MHz, bug
-    //adspi.frequency(10000000); //10MHz gives 7.5MHz     
+    //adspi.format(8, 3);
+    //adspi.frequency(5000000); //5MHz gives 3.75MHz, bug    
+    LL_SPI_Disable(SPI1);
+    LL_SPI_SetBaudRatePrescaler(SPI1, LL_SPI_BAUDRATEPRESCALER_DIV16);
+    LL_SPI_SetClockPolarity(SPI1, LL_SPI_POLARITY_HIGH);
+    LL_SPI_SetClockPhase(SPI1, LL_SPI_PHASE_2EDGE);    
+    LL_SPI_Enable(SPI1);
     select_saved = spiADC;
   }
   if((select == spiDAC) && (select_saved != spiDAC))
   {
-    adspi.format(8, 1); //8 bits, SPI mode 1
-    adspi.frequency(20000000); //20MHz gives 15MHz, bug
+    LL_SPI_Disable(SPI1);
+    LL_SPI_SetBaudRatePrescaler(SPI1, LL_SPI_BAUDRATEPRESCALER_DIV4);
+    LL_SPI_SetClockPolarity(SPI1, LL_SPI_POLARITY_LOW);
+    LL_SPI_SetClockPhase(SPI1, LL_SPI_PHASE_2EDGE);
+    LL_SPI_SetInterDataIdleness(SPI1, LL_SPI_ID_IDLENESS_00CYCLE);
+    LL_SPI_Enable(SPI1);
+    //adspi.format(8, 1); //8 bits, SPI mode 1
+    //adspi.frequency(20000000); //20MHz gives 15MHz, bug
     select_saved = spiDAC;
   }
-  //LL_GPIO_SetPinSpeed(GPIOB, LL_GPIO_PIN_3, LL_GPIO_SPEED_FREQ_LOW); //SCK
-  //LL_GPIO_SetPinSpeed(GPIOD, LL_GPIO_PIN_7, LL_GPIO_SPEED_FREQ_LOW); //MOSI
 }
 
 ///////////////////
