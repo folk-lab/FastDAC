@@ -83,6 +83,7 @@ float g_dac_bit_res = g_dac_full_scale / 32768.0;
 volatile int16_t g_DACsetpoint[NUMDACCHANNELS];//global array for current DAC setpoints, only written to in DACintegersend()
 
 //Ramp interrupt global variables
+volatile bool g_dacsused = false;
 volatile bool g_done = false;
 volatile bool g_firstsamples = true;
 volatile uint8_t g_numrampADCchannels;
@@ -2134,10 +2135,12 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
   {
     syntax_error();
     return;
-  }  
+  }
+  g_dacsused = false;  
   //check if no DACs selected
   if(g_numrampDACchannels != 0)
   {
+    g_dacsused = true;
     //define DAC channels and check range
     for(i = 0; i < g_numrampDACchannels; i++)
     {
@@ -2284,7 +2287,7 @@ void int_arg_ramp(InCommand *incommand)
     //SERIALPORT.println("NO DACS");
     g_numrampDACchannels = 0;
   }
-
+  g_dacsused = true;
   g_done = false;  
   g_firstsamples = true;
   g_nextloop = false;
@@ -2423,7 +2426,8 @@ void spec_ana(InCommand * incommand)
   char * channelsADC = incommand->token[1];
   g_numrampADCchannels = strlen(channelsADC);
   g_numsteps=atoi(incommand->token[2]);
-
+  
+  g_dacsused = false;
   g_done = false;  
   g_firstsamples = true;
   g_nextloop = false;
@@ -2556,6 +2560,7 @@ void awg_ramp(InCommand *incommand)
     g_numrampDACchannels = 0;
   }
 
+  g_dacsused = true;
   g_done = false;
   g_nextloop = false;
   g_firstsamples = true;
@@ -2730,7 +2735,7 @@ void awg_arg_ramp(InCommand *incommand)
   }
   for(i = 0; i < g_numargramps; i++)
   {
-    char * channelsramp = incommand->token[i + g_numwaves + 2];
+    char * channelsramp = incommand->token[i + g_numwaves + 3];
     g_argramp[i].numDACchannels = strlen(channelsramp);
     //g_argramp[i].setpointcount = 0;
     for(j = 0; j < g_argramp[i].numDACchannels; j++)
@@ -2773,7 +2778,8 @@ void awg_arg_ramp(InCommand *incommand)
     //SERIALPORT.println("NO DACS");
     g_numrampDACchannels = 0;
   }
-
+  
+  g_dacsused = true;
   g_done = false;
   g_nextloop = false;
   g_firstsamples = true;
@@ -2899,8 +2905,11 @@ void awg_ramp_int()//interrupt for AWG ramp
    uint32_t i, j;
    if(!g_done)
    {
-      ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
-      ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+      if(g_dacsused)
+      {
+        ldac_port->PIO_CODR |= (ldac0_mask | ldac1_mask);//Toggle ldac pins
+        ldac_port->PIO_SODR |= (ldac0_mask | ldac1_mask);
+      }
 
       if(g_firstsamples)
       {
