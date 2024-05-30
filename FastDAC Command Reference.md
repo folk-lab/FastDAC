@@ -439,14 +439,14 @@ Returns:
 
 # AWG FUNCTIONS
 
-The FastDAC has an arbitrary waveform mode where a sequence of DAC setpoints can be assigned to 2 separate wave arrays. Up to 100 setpoints can be configured for each wave, and the number of ADC samples to take at each setpoint is specified. When an `AWG_RAMP` sequence is started, the AWG DAC channels assigned to each wave loop through the sequence a specified number of times, then the ramp DAC channels will take a step. The AWG waveforms will repeat until the ramp DAC channels finish their ramp.
+The FastDAC has an arbitrary waveform mode where a sequence of DAC setpoints can be assigned to 8 separate wave arrays. Up to 4000 setpoints can be configured for each wave, and the number of ADC samples to take at each setpoint is specified. When an `AWG_RAMP` sequence is started, the AWG DAC channels assigned to each wave loop through the sequence a specified number of times, then the ramp DAC channels will take a step. The AWG waveforms will repeat until the ramp DAC channels finish their ramp.
 
 ## ADD_WAVE
 
-`ADD_WAVE` is used to configure the arbitrary DAC setpoints. For each setpoint the number of ADC samples to take is also specified (max 2^32-1). The function can be called multiple times until up to 100 setpoints have been stored, and should be sent in groups of 1024 characters or less to avoid a possible serial buffer overflow.
+`ADD_WAVE` is used to configure the arbitrary DAC setpoints. For each setpoint the number of ADC samples to take is also specified (max 2^31-1). The function can be called multiple times until up to 4000 setpoints have been stored, and should be sent in groups of 10000 characters or less to avoid a possible serial buffer overflow.
 
 Syntax:  
-`ADD_WAVE,{wave number (0 or 1)},{Setpoint 0 in mV},{Number of ADC samples to take at setpoint 0},{...},{Setpoint n in mV},{Number of samples to take at Setpoint n}`
+`ADD_WAVE,{wave number (0-7)},{Setpoint 0 in mV},{Number of ADC samples to take at setpoint 0},{...},{Setpoint n in mV},{Number of samples to take at Setpoint n}`
 
 Example (setting 4 setpoints with various sample lengths to wave 0):  
 `ADD_WAVE,0,100.0,50,500.0,25,200.0,100,-5000.0,25`
@@ -456,7 +456,7 @@ Returns:
 
 ## CHECK_WAVE
 
-`CHECK_WAVE` returns how many setpoints, and the total number of samples, have been configured for the specified wave number (0 or 1).
+`CHECK_WAVE` returns how many setpoints, and the total number of samples, have been configured for the specified wave number (0-7).
 
 Syntax:  
 `CHECK_WAVE,{wave number}`
@@ -482,7 +482,7 @@ Returns:
 
 ## AWG_RAMP
 
-Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, as well as number of ramp steps. Additionally, you select the number of independent waveforms (currently max 2), The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. If the waveforms are different lengths, the repetition counter will increment when any waveform completes.
+Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, as well as number of ramp steps. Additionally, you select the number of independent waveforms, The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. If the waveforms are different lengths, the repetition counter will increment when any waveform completes.
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
@@ -499,14 +499,14 @@ Returns:
 
 # ARG (Arbitrary Ramp Generator) FUNCTIONS
 
-The FastDAC has an arbitrary ramp mode where a sequence of DAC setpoints can be assigned to 4 separate ramp arrays. Up to 10000 setpoints can be configured for each ramp. When an `INT_ARG_RAMP` sequence is started, the ramp with the largest number of samples decides the `NUMBER OF STEPS` compared to a regular `INT_RAMP`. The `NUMBER OF SAMPLES PER STEP` is specified and the `ARG` DAC channels will take a step at the same time as the linear-ramp DAC channels.
+The FastDAC has an arbitrary ramp mode where a sequence of DAC setpoints can be assigned to 8 separate ramp arrays. Up to 400,000 setpoints can be configured for each ramp. When an `INT_ARG_RAMP` sequence is started, the ramp with the largest number of samples decides the `NUMBER OF STEPS` compared to a regular `INT_RAMP`. The `NUMBER OF SAMPLES PER STEP` is specified and the `ARG` DAC channels will take a step at the same time as the linear-ramp DAC channels.
 
 ## ADD_RAMP
 
-`ADD_RAMP` is used to configure the arbitrary ramp DAC setpoints. The function can be called multiple times until up to 10000 setpoints have been stored, and should be sent in groups of 1024 characters or less to avoid a possible serial buffer overflow.
+`ADD_RAMP` is used to configure the arbitrary ramp DAC setpoints. The function can be called multiple times until up to 400,000 setpoints have been stored, and should be sent in groups of 10,000 characters or less to avoid a possible serial buffer overflow. Filling ramps takes approximately 4 seconds per 100,000 points.
 
 Syntax:  
-`ADD_RAMP,{ramp number (0-3)},{Setpoint 0 in mV},{...},{Setpoint n in mV}`
+`ADD_RAMP,{ramp number (0-7)},{Setpoint 0 in mV},{...},{Setpoint n in mV}`
 
 Example (setting 8 setpoints to ramp 0):  
 `ADD_RAMP,0,100.0,50.5,500.0,250.2,-200.0,100.0,-50.0,250.3`
@@ -514,9 +514,28 @@ Example (setting 8 setpoints to ramp 0):
 Returns:  
 `RAMP,0,8`
 
+## ADD_RAMP_RAW
+
+`ADD_RAMP_RAW` is used to configure the arbitrary ramp DAC setpoints by sending a stream of 16-bit integers rather than the floating point values of `ADD_RAMP`. The ramps can be filled ~4x faster this way, at a rate of approximately 100,000 points per second. The user specifies the ramp number to fill, and the number of samples to be sent in the stream as the command, which is then followed by the stream of samples. The function can be called multiple times until up to 400,000 setpoints have been stored, but unlike `ADD_RAMP` it is possible to send all 400,000 points as a single stream. If the specified number of samples have not yet been received, and no additional samples have been received for 3 seconds, the FastDAC will return `TIMEOUT` followed by the regular response.
+
+The setpoints should be sent as big-endian (high byte first) signed 16-bit integers, where -32768 to 32767 maps to -10 to +10V (actually +9.999695V). This is different from the offset-binary format returned by the ADC.
+
+The first part of the command, specifying the ramp number and number of samples has the usual `\r` (carriage return), `\n` (newline) at the end and the FastDAC will return `ACK` and wait for the samples, the stream that follows does not require these end of message charaters.
+
+Syntax:  
+`ADD_RAMP_RAW,{ramp number (0-7)},{Number of 16-bit integers to send}`  
+`{Steam of 16-bit integers}`
+
+Example (setting 8 setpoints to ramp 0):  
+`ADD_RAMP_RAW,0,8`  
+`{Stream of 8 16-bit integers (32 bytes/chars)}`
+
+Returns:  
+`RAMP,0,8`
+
 ## CHECK_RAMP
 
-`CHECK_RAMP` returns how many setpoints have been configured for the specified ramp number (0-3).
+`CHECK_RAMP` returns how many setpoints have been configured for the specified ramp number (0-7).
 
 Syntax:  
 `CHECK_RAMP,{ramp number}`
@@ -526,6 +545,19 @@ Example (for ramp in example above):
 
 Returns:  
 `RAMP,0,8`
+
+## CHECK_RAMP_CRC
+
+`CHECK_RAMP_CRC` returns how many setpoints have been configured for the specified ramp number (0-7), as well as a byte-by-byte CRC-32 checksum calculated for all the points in the ramp. The samples are stored in the internal memory as little-endian 16-bit integers, so this must be taken into account to get a correct CRC-32 match.
+
+Syntax:  
+`CHECK_RAMP_CRC,{ramp number}`
+
+Example:  
+`CHECK_RAMP_CRC,0`
+
+Returns:  
+`RAMP,0,8,3293121714`
 
 ## CLR_RAMP
 
@@ -542,7 +574,7 @@ Returns:
 
 ## INT_ARG_RAMP
 
-Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, but no longer specify the `number of steps` as this is decided by the longest selected ARG ramp. Additionally, you select the number of independent ARG ramps (currently max 4), The DAC channels assigned to each ARG ramp, and the number of samples to take at each ramp step. If the ARG ramps are different lengths, the shorter ARG ramps will stay at their final setpoint until the longest ARG ramp completes.
+Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, but no longer specify the `number of steps` as this is decided by the longest selected ARG ramp. Additionally, you select the number of independent ARG ramps, The DAC channels assigned to each ARG ramp, and the number of samples to take at each ramp step. If the ARG ramps are different lengths, the shorter ARG ramps will stay at their final setpoint until the longest ARG ramp completes.
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
@@ -559,7 +591,7 @@ Returns:
 
 ## AWG_ARG_RAMP
 
-Similar to `AWG_RAMP` you specify which ADC channels, linear-ramp DAC channels, the number of independent AWG waveforms (currently max 2), The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. Additionally, the number of independent ARB ramps (max 4) is also selected, and the DAC channels assigned to each ARB ramp. Unlike `AWG_RAMP`, the `# of ramp steps` parameter is determined by the length of the longest ARB ramp selected.
+Similar to `AWG_RAMP` you specify which ADC channels, linear-ramp DAC channels, the number of independent AWG waveforms, The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. Additionally, the number of independent ARB ramps is also selected, and the DAC channels assigned to each ARB ramp. Unlike `AWG_RAMP`, the `# of ramp steps` parameter is determined by the length of the longest ARB ramp selected.
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
@@ -576,7 +608,7 @@ Returns:
 
 # PID FUNCTIONS
 
-Somewhat experimental, the FastDAC can act as a PID controller, currently only ADC 0 acts as the input, and DAC 0 acts as the output. While in PID mode, no other commands which use the ADC should be issued (`INT_RAMP`, `SPEC_ANA`, `AWG_RAMP`, `GET_ADC`), but DAC ramping channels other than DAC 0 via `RAMP_SMART` should be OK. While in PID mode, the loops runs continuously at the selected ADC 0 conversion time, and every 10th sample from ADC 0 and the output setting of DAC 0 will be returned as little-endian 4-byte floats followed by framing sequence `0xA5 0x5A`. This formatting and framing sequence was chosen for easy testing and live tuning with RealTerm 3.0.1.44 and could be changed. The PID routines are based on this library with some modifications:
+Somewhat experimental, the FastDAC can act as a PID controller, currently only ADC 0 acts as the input, and DAC 0 acts as the output. While in PID mode, no other commands which use the ADC should be issued (`INT_RAMP`, `SPEC_ANA`, `AWG_RAMP`, `GET_ADC`), but DAC ramping channels other than DAC 0 via `RAMP_SMART` is OK. While in PID mode, the loops runs continuously at the selected ADC 0 conversion time, and every 10th sample from ADC 0 and the output setting of DAC 0 will be returned as little-endian 4-byte floats followed by framing sequence `0xA5 0x5A`. This formatting and framing sequence was chosen for easy testing and live tuning with RealTerm 3.0.1.44 and could be changed. The PID routines are based on this library with some modifications:
 
 https://github.com/br3ttb/Arduino-PID-Library
 
