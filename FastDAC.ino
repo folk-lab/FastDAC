@@ -42,16 +42,12 @@
 
 #define MAXNUMPIDS 1 //Maximum number of simultaneous PID loops, only 1 for now
 
-
 #define COMMANDBUFFERSIZE 10025 //Buffer for incoming command
 #define MAXPARAMS 3000 //maximum number of parameters to be parsed in a single command
 
 #define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
 //#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
-
-#define BIT31 0x10000000 //Some scaling constants for fixed-point math
-#define BIT47 0x100000000000
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
@@ -3378,7 +3374,10 @@ void ramp_event(void)//event for ramp
             for(i = 0; i < g_numrampDACchannels; i++)
             {
               g_DACramppoint[i] += g_DACstep[i];
-              DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));
+              //DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT44));
+              DACintegersend(g_DACchanselect[i], linearDACscale(g_DACramppoint[i]));
+              //SERIALPORT.print(linearDACscale(g_DACramppoint[i]));
+              //SERIALPORT.print(",");
             }
             //get next arbitrary ramp DAC step ready
             for(i = 0; i < g_numargramps; i++)
@@ -3395,6 +3394,19 @@ void ramp_event(void)//event for ramp
         }
       }
    }
+}
+
+int16_t linearDACscale(int64_t ramppoint)
+{
+  if(ramppoint >= 0)
+  {
+    ramppoint += BIT43;
+  }
+  else if(ramppoint < 0)
+  {
+    ramppoint -= BIT43;
+  }
+  return (int16_t)(ramppoint / BIT44);
 }
 
 void g_configurerampADCchannels(void)
@@ -3426,16 +3438,16 @@ void g_configurerampDACchannels(void)
   uint8_t i;
   for(i = 0; i < g_numrampDACchannels; i++)
   {
-    g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT31;
+    g_DACramppoint[i] = (int64_t)g_DACstartpoint[i] * BIT28;
     if(g_numsteps < 2) //handle numsteps < 2
     {
-      g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31));
+      g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT28) - ((int64_t)g_DACstartpoint[i] * BIT28));
     }
     else
     {
-      g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT31) - ((int64_t)g_DACstartpoint[i] * BIT31)) / (g_numsteps - 1);
+      g_DACstep[i] = (((int64_t)g_DACendpoint[i] * BIT28) - ((int64_t)g_DACstartpoint[i] * BIT28)) / (g_numsteps - 1);
     }
-    DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT47));//Set ramp DACs to initial point
+    DACintegersend(g_DACchanselect[i], (g_DACramppoint[i] / BIT44));//Set ramp DACs to initial point
 
 #ifdef DEBUGRAMP
     SERIALPORT.print("DAC ch ");
@@ -3443,11 +3455,11 @@ void g_configurerampDACchannels(void)
     SERIALPORT.print(" Startpoint: ");
     SERIALPORT.print(g_DACstartpoint[i]);
     SERIALPORT.print(" Ramppoint: ");
-    SERIALPORT.print((int32_t)(g_DACramppoint[i] / BIT31));
+    SERIALPORT.print((int32_t)(g_DACramppoint[i] / BIT28));
     SERIALPORT.print(", Finalpoint: ");
     SERIALPORT.print(g_DACendpoint[i]);
     SERIALPORT.print(", Stepsize: ");
-    SERIALPORT.println((int32_t)(g_DACstep[i] / BIT31));
+    SERIALPORT.println((int32_t)(g_DACstep[i] / BIT28));
 #endif    
   }
 }

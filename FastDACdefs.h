@@ -9,7 +9,7 @@
 #define SERIALPORT SerialUSB
 #endif
 
-#define FW_VER "SERVICE-GIGA-TEST"
+#define FW_VER "SERVICE-GIGA-TEST2"
 
 #define IDSTRING "FASTDAC"
 
@@ -21,6 +21,10 @@
 #define DEFAULT_INT_PRI 0x03 //interrupt priority to set all irq channels, set specific ones afterwards
 
 #define RAMP_SEND_TIMEOUT 3000 //timeout in millisec if no data received during ramp stream
+
+#define BIT28 0x10000000 //Some scaling constants for fixed-point math
+#define BIT44 0x100000000000
+#define BIT43 0x80000000000
 
 //AD7734 Register addresses
 #define ADC_IO 0x01
