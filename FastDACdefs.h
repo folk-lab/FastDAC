@@ -9,7 +9,7 @@
 #define SERIALPORT SerialUSB
 #endif
 
-#define FW_VER "SERVICE-ARG-TEST2"
+#define FW_VER "SERVICE-ARG-TEST3"
 
 #define IDSTRING "FASTDAC"
 
@@ -17,6 +17,10 @@
 #define NUMADCCHANNELS 4
 
 #define CAL_SETTLE_TIME 3000 //time in us for DACs to settle before auto cal ADC
+
+#define BIT28 0x10000000 //Some scaling constants for fixed-point math
+#define BIT44 0x100000000000
+#define BIT43 0x80000000000
 
 //AD7734 Register addresses
 #define ADC_IO 0x01
