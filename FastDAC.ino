@@ -938,12 +938,14 @@ void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
     return;
   }
   send_ack();
+  /*
   if (abs(setpoint-initial) < 0.0001)  //If already at setpoint
   {
     SERIALPORT.print("RAMP_FINISHED,");
     SERIALPORT.println(dacChannel);
     return;
   }
+  */
   // Calc ramprate, pass to autoRamp1
   uint32_t nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
   if (nSteps < 5)
@@ -984,7 +986,10 @@ void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t
   if(g_rsramp[dacChannel].active == false)
   {
     digitalWrite(data,HIGH);
-    g_rsramp[dacChannel].active = true;
+    if (abs(v2-v1) > 0.0001)  //If not already at setpoint set to active
+    {
+      g_rsramp[dacChannel].active = true;
+    }    
     g_rsramp[dacChannel].v1 = v1;
     g_rsramp[dacChannel].v2 = v2;
     g_rsramp[dacChannel].nSteps = nSteps;
@@ -1033,14 +1038,15 @@ void rs_event(void)
       }
       else
       {
-        SERIALPORT.print("RAMP_FINISHED,");
-        SERIALPORT.println(ch);
+        //SERIALPORT.print("RAMP_FINISHED,");
+        //SERIALPORT.println(ch);
         g_rsramp[ch].active = false;
       }
     }
   }
   if(!any_active)
   {
+    SERIALPORT.println("RAMP_FINISHED");
     rs_timer.detach();    
   }
   g_anyrsactive = any_active;
