@@ -835,6 +835,9 @@ void get_dac(InCommand * incommand) //(DAC channel)
   {
     send_ack();
     SERIALPORT.println(readDAC(dacChannel), 4);
+#ifdef DEBUGRAMP
+    SERIALPORT.println(g_DACsetpoint[dacChannel]);  
+#endif    
   }
   
 }
@@ -904,73 +907,90 @@ void writeADCfw(uint8_t ch, uint8_t fw)
 
 //// DAC ////
 
-void ramp_smart(InCommand *incommand)  //(channel,setpoint,ramprate)
+void ramp_smart(InCommand *incommand)  //<dac channels>,<target dac voltage 1>,...<target dac voltage n>,<mV/s 1>,...<mV/s n>
 {
-  if(incommand->paramcount != 4)
+  if(g_anyrsactive)//check if already active
+  {
+    SERIALPORT.println("RAMP_ACTIVE");
+    return;
+  }
+  
+  if(incommand->paramcount < 4)//Check for minimum number of parameters
   {
     syntax_error();
     return;
   }
-  uint8_t dacChannel = atoi(incommand->token[1]);
-  if(dacChannel >= NUMDACCHANNELS)
-  {
-    range_error();
-    return;
-  }
-  float setpoint = atof(incommand->token[2]);
-  if((abs(setpoint) / 1000.0) > g_dac_full_scale)
-  {
-    range_error();
-    return;
-  }
-  //float ramprate = DB[3].toFloat();
-  float ramprate = atof(incommand->token[3]);
-  if(ramprate <= 0.0)
-  {
-    range_error();
-    return;
-  }
-  float initial = readDAC(dacChannel);  //mV
-  if(g_rsramp[dacChannel].active)
-  {
-    SERIALPORT.print("RAMP_ACTIVE,");
-    SERIALPORT.println(dacChannel);
-    return;
-  }
-  send_ack();
-  /*
-  if (abs(setpoint-initial) < 0.0001)  //If already at setpoint
-  {
-    SERIALPORT.print("RAMP_FINISHED,");
-    SERIALPORT.println(dacChannel);
-    return;
-  }
-  */
-  // Calc ramprate, pass to autoRamp1
-  uint32_t nSteps = static_cast<int>(abs(setpoint-initial)/ramprate*1000);  //using 1ms as delay
-  if (nSteps < 5)
-  {
-    nSteps = 5;
-  }
-#ifdef DEBUGRAMP  
-  SERIALPORT.print("initial: ");
-  SERIALPORT.println(initial);
-
-  SERIALPORT.print("setpoint: ");
-  SERIALPORT.println(setpoint);  
   
-  SERIALPORT.print("nsteps: ");
-  SERIALPORT.println(nSteps);
-#endif
-  autoRamp1(initial, setpoint, nSteps, dacChannel, 1000, incommand);
+  char * channelsDAC = incommand->token[1];
+  uint8_t numDACchannels = strlen(channelsDAC);
+
+  //Do some bounds checking
+  if((numDACchannels > NUMDACCHANNELS) || (incommand->paramcount != numDACchannels * 2 + 2))
+  {
+    syntax_error();
+    return;
+  }  
+
+  uint8_t DACchanselect[NUMDACCHANNELS];
+  float DACtarget[NUMDACCHANNELS];
+  float DACinitial[NUMDACCHANNELS];
+  float DACramprate[NUMDACCHANNELS];
+  //define DAC channels, setpoints, ramprates, and check range
+  for(uint8_t i = 0; i < numDACchannels; i++)
+  {
+    DACchanselect[i] = channelsDAC[i] - '0';
+    if(DACchanselect[i] >= NUMDACCHANNELS)
+    {
+      range_error();
+      return;
+    }
+
+    DACinitial[i] = readDAC(DACchanselect[i]); //mV
+    float target = atof(incommand->token[i + 2]);
+    if((abs(target / 1000.0) > g_dac_full_scale))
+    {
+      range_error();
+      return;
+    }
+    DACtarget[i] = target;
+    float ramprate = atof(incommand->token[numDACchannels + i + 2]);
+    if(ramprate <= 0.0)
+    {
+      range_error();
+      return;
+    }
+    DACramprate[i] = ramprate;
+#ifdef DEBUGRAMP
+    SERIALPORT.print("Channel ");
+    SERIALPORT.println(DACchanselect[i]);    
+    SERIALPORT.print("Initial: ");
+    SERIALPORT.println(DACinitial[i]);
+    SERIALPORT.print("Target: ");
+    SERIALPORT.println(DACtarget[i]);
+    SERIALPORT.print("Ramprate: ");
+    SERIALPORT.println(DACramprate[i]);
+#endif    
+
+  }
+  send_ack();//Syntax OK, send the ACK
+  //start the autoramp for each channel
+  for(uint8_t i = 0; i < numDACchannels; i++)
+  {
+    uint32_t nSteps = static_cast<int>(abs(DACtarget[i]-DACinitial[i])/DACramprate[i]*1000);  //using 1ms as delay
+    if (nSteps < 5)
+    {
+      nSteps = 5;
+    }
+    autoRamp1(DACinitial[i], DACtarget[i], nSteps, DACchanselect[i], 1000, incommand);
+  }
   return;
 }
 
 void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t period, InCommand *incommand)
 // voltage in mV
 {
-  
-  #ifdef DEBUGRAMP  
+/*  
+#ifdef DEBUGRAMP  
   SERIALPORT.print("v1: ");
   SERIALPORT.println(v1);
 
@@ -980,7 +1000,7 @@ void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t
   SERIALPORT.print("nsteps: ");
   SERIALPORT.println(nSteps);
 #endif
-  
+*/  
 
   
   if(g_rsramp[dacChannel].active == false)
@@ -1067,13 +1087,12 @@ void ramp_stop(InCommand * incommand)
   {   
     if(g_rsramp[ch].active)
     {
-      SERIALPORT.print("RAMP_FINISHED,");
-      SERIALPORT.println(ch);
       g_rsramp[ch].active = false;      
     }
   }    
   g_anyrsactive = false;
   g_rsflag = false;
+  SERIALPORT.println("RAMP_FINISHED");      
 }
 
 ////////////////////////////
@@ -2187,7 +2206,7 @@ int16_t voltageToInt16(float voltage)
   {
     voltage = g_dac_full_scale - g_dac_bit_res;
   }
-  return  (int16_t)((voltage / g_dac_full_scale) * 0x8000); 
+  return  (int16_t)(round((voltage / g_dac_full_scale) * 0x8000)); 
   
   /*
   else if (voltage >= 0)

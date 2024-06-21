@@ -49,15 +49,17 @@ Returns:
 
 ## RAMP_SMART
 
-Ramps one DAC channel to a specified setpoint **in mV** at a given ramprate in 1ms steps. It looks up the current DAC value internally to make sure there are no sudden jumps in voltage. Multiple channels can be ramped simultaneously be sending multiple `RAMP_SMART` commands. The `RAMP_FINISHED` response will only be returned when all simultaneous ramps have completed.
+Ramps the specified DAC channels to a specified setpoint **in mV** at a given ramprate in 1ms steps. It looks up the current DAC value internally to make sure there are no sudden jumps in voltage. Multiple channels can be ramped simultaneously. The `RAMP_FINISHED` response will only be returned when all simultaneous ramps have completed.
 
 All ramps can be stopped at any time by sending the command `STOP`.
 
 Syntax:  
-`RAMP_SMART,{dac_channel},{setpoint},{ramprate in mV/s}`
+`RAMP_SMART,{dac channels to ramp},{setpoint 1 in mV},{...},{setpoint n in mV},{ramprate 1 in mV/s},...,{ramprate n in mV/s}`
 
-Example (to ramp DAC3 to 4000mV at 1000mV/s):  
-`RAMP_SMART,3,4000,1000`  
+Do not add commas between specified DAC channels.
+
+Example (ramp DAC 3 to 4000mV at 1000mV/s, and ramp DAC 1 to -300mV at 50mV/s):  
+`RAMP_SMART,31,4000,-300,1000,50`  
 
 Returns:  
 `RAMP_FINISHED`
