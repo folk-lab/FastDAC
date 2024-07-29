@@ -1,4 +1,4 @@
-//Arduino *DUE*code for controlling EVAL-AD7734 ADC and EVAL-AD5764 DAC
+//Arduino GIGA R1 code for controlling EVAL-AD7734 ADC and EVAL-AD5764 DAC
 //Andrea Young (UCSB)
 //Carlos Kometter (UCSB)
 
@@ -1005,10 +1005,10 @@ void autoRamp1(float v1, float v2, uint32_t nSteps, uint8_t dacChannel, uint32_t
   
   if(g_rsramp[dacChannel].active == false)
   {
-    digitalWrite(data,HIGH);
     if (abs(v2-v1) > 0.0001)  //If not already at setpoint set to active
     {
       g_rsramp[dacChannel].active = true;
+      digitalWrite(data,HIGH);
     }    
     g_rsramp[dacChannel].v1 = v1;
     g_rsramp[dacChannel].v2 = v2;
@@ -1053,6 +1053,7 @@ void rs_event(void)
           setpoint = g_dac_full_scale * -1000.0;
         }
         writeDAC(ch, setpoint, true); // takes mV
+        digitalWrite(data, HIGH);
         //SERIALPORT.println(v1+(v2-v1)*j/(nSteps-1));
         g_rsramp[ch].stepcount++;
       }
@@ -1067,7 +1068,8 @@ void rs_event(void)
   if(!any_active)
   {
     SERIALPORT.println("RAMP_FINISHED");
-    rs_timer.detach();    
+    rs_timer.detach();
+    digitalWrite(data, LOW);    
   }
   g_anyrsactive = any_active;
   g_rsflag = false;
@@ -1092,7 +1094,8 @@ void ramp_stop(InCommand * incommand)
   }    
   g_anyrsactive = false;
   g_rsflag = false;
-  SERIALPORT.println("RAMP_FINISHED");      
+  SERIALPORT.println("RAMP_FINISHED");
+  digitalWrite(data, LOW);         
 }
 
 ////////////////////////////
