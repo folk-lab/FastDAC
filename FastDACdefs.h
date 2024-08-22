@@ -9,7 +9,7 @@
 #define SERIALPORT SerialUSB
 #endif
 
-#define FW_VER "SERVICE-GIGA-TEST4"
+#define FW_VER "SERVICE-GIGA-TEST5"
 
 #define IDSTRING "FASTDAC"
 
@@ -25,6 +25,10 @@
 #define BIT28 0x10000000 //Some scaling constants for fixed-point math
 #define BIT44 0x100000000000
 #define BIT43 0x80000000000
+
+#define DEFAULT_DAC_VSCALE 10.0
+#define MAX_DAC_VSCALE 10.0
+#define MIN_DAC_VSCALE 1.0
 
 //AD7734 Register addresses
 #define ADC_IO 0x01

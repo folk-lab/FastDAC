@@ -283,7 +283,8 @@ void setup()
     digitalWrite(ldac1, HIGH);
   }
   loadadccals();
-  
+
+  set_full_sc(readeepromdacfullsc());
   //print_interrupt_active();
   //print_interrupt_priorities();
   //SERIALPORT.println(sizeof(ARGramp[ARGMAXRAMPS]) + (16 * ARGMAXRAMPS));
@@ -598,9 +599,13 @@ void router(InCommand *incommand)
     {  
       default_cal(incommand);
     }
-    else if(strcmp("FULL_SCALE", cmd) == 0)  
+    else if(strcmp("SET_FULL_SCALE", cmd) == 0)  
     {  
-      full_scale(incommand);
+      set_full_scale(incommand);
+    }
+    else if(strcmp("READ_FULL_SCALE", cmd) == 0)  
+    {  
+      read_full_scale(incommand);
     }
     else if(strcmp("SET_MODE", cmd) == 0)  
     {  
@@ -685,6 +690,10 @@ void router(InCommand *incommand)
     else if(strcmp("CAL_ALL_ADC_EEPROM_WITH_DAC", cmd) == 0)
     {  
       cal_all_adc_eeprom_with_dac(incommand);
+    }
+    else if(strcmp("WRITE_FULL_SCALE_EEPROM", cmd) == 0)
+    {  
+      write_full_scale_eeprom(incommand);
     }
     else
     {
@@ -1697,7 +1706,7 @@ void writeADCchfullscale(byte ch, int32_t fullscale)
 
 //// DAC ////
 
-void full_scale(InCommand *incommand)
+void set_full_scale(InCommand *incommand)
 {
   if(incommand->paramcount != 2)
   {
@@ -1705,17 +1714,32 @@ void full_scale(InCommand *incommand)
     return;
   }
   float dacscale = atof(incommand->token[1]);
-  if(dacscale < 0.0)
+  if((dacscale > MAX_DAC_VSCALE) || (dacscale < MIN_DAC_VSCALE))
   {
     range_error();
     return;
   }
   send_ack();
-  g_dac_full_scale = dacscale;
-  g_dac_bit_res = g_dac_full_scale / 32768.0;
+  set_full_sc(dacscale);
   SERIALPORT.println("FULL_SCALE_UPDATED");
 }
 
+void set_full_sc(float dacscale)
+{
+  g_dac_full_scale = dacscale;
+  g_dac_bit_res = g_dac_full_scale / 32768.0;
+}
+
+void read_full_scale(InCommand *incommand)
+{
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  send_ack();
+  SERIALPORT.println(g_dac_full_scale);
+}
 void dac_offset_adj(InCommand *incommand)
 {
   if(incommand->paramcount != 3)
@@ -4062,6 +4086,24 @@ void cal_all_adc_eeprom_with_dac(InCommand * incommand)
       SERIALPORT.print(fw);
       SERIALPORT.print(" SAVED, ");
   }  
-  SERIALPORT.println("CALIBRATION_FINISHED");
-  
+  SERIALPORT.println("CALIBRATION_FINISHED");  
+}
+
+void write_full_scale_eeprom(InCommand * incommand)
+{
+  if(incommand->paramcount != 1)
+  {
+    syntax_error();
+    return;
+  }
+  if(digitalRead(EEPROM_WP_PIN) == HIGH)
+  {
+ 	  SERIALPORT.println("WRITE_PROTECTED");
+ 	  return;
+  }
+  send_ack();
+  writeeepromdacfullsc(g_dac_full_scale);
+  SERIALPORT.print("FULL_SCALE ");
+  SERIALPORT.print(readeepromdacfullsc());
+  SERIALPORT.println(" SAVED");
 }

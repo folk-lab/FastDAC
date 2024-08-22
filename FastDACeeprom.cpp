@@ -1,6 +1,6 @@
 #include "FastDACeeprom.h"
 
-#define IDTEST "Unit 2"
+//#define IDTEST "Unit 2"
 
 ExternalEEPROM extprom;
 
@@ -191,3 +191,42 @@ uint8_t writeeepromadccal(uint8_t ch, uint8_t fw, uint32_t zeroscale, uint32_t f
 
   return 0;
 }
+
+float readeepromdacfullsc(void)
+{
+ 
+  uint32_t dacfullsctemp = 0;
+  uint8_t dacfullscbyte;
+  //float dacfullsc = 10.0;
+  for(uint8_t i = 0; i < EEPROM_DAC_FULLSC_LEN; i++)
+  {
+    dacfullscbyte = extprom.read(EEPROM_DAC_FULLSC_ADDR + i);
+    dacfullsctemp |= dacfullscbyte << (i * 8);
+  }
+  //SERIALPORT.println(dacfullsctemp, HEX);
+  float *dacfullsc = (float *)&dacfullsctemp;  
+  if((*dacfullsc > MAX_DAC_VSCALE) || (*dacfullsc < MIN_DAC_VSCALE) || (dacfullsctemp == 0xFFFFFFFF))
+  {
+    SERIALPORT.print("DAC FULLSCALE: ");
+    SERIALPORT.print(*dacfullsc);
+    SERIALPORT.println(" uninitialized!! setting to ");
+    SERIALPORT.println(DEFAULT_DAC_VSCALE);
+    *dacfullsc = DEFAULT_DAC_VSCALE;
+    writeeepromdacfullsc(*dacfullsc);
+  }
+  return *dacfullsc;
+}
+
+void writeeepromdacfullsc(float dacfullsc)
+{
+  uint32_t *dacfullsctemp = (uint32_t *)&dacfullsc;
+  uint32_t dacfullscint = *dacfullsctemp;
+  uint8_t dacfullscbyte;
+  for(uint8_t i = 0; i < EEPROM_DAC_FULLSC_LEN; i++)
+  {
+    dacfullscbyte = dacfullscint & 0xFF;
+    extprom.write((EEPROM_DAC_FULLSC_ADDR + i), dacfullscbyte);
+    dacfullscint = dacfullscint >> 8;
+  }  
+}
+

@@ -46,6 +46,10 @@
 
 #define EEPROM_ADC_CH_LEN (EEPROM_ADC_CH_VAR_SIZE * 2) * EEPROM_ADC_NUM_FWS
 
+#define EEPROM_DAC_FULLSC_ADDR EEPROM_ADC_FACT_CAL_ADDR + EEPROM_ADC_CAL_LEN
+
+#define EEPROM_DAC_FULLSC_LEN 4
+
 
 void eepromtest(void);
 uint8_t initeeprom(void);
@@ -55,5 +59,7 @@ uint8_t readeepromdaccal(uint8_t ch, int8_t * offset, int8_t * gain, bool factor
 uint8_t writeeepromdaccal(uint8_t ch, int8_t offset, int8_t gain, bool factory);
 uint8_t readeepromadccal(uint8_t ch, uint8_t fw, uint32_t * zeroscale, uint32_t * fullscale, bool factory);
 uint8_t writeeepromadccal(uint8_t ch, uint8_t fw, uint32_t zeroscale, uint32_t fullscale, bool factory);
+float readeepromdacfullsc(void);
+void writeeepromdacfullsc(float dacfullsc);
 
 #endif

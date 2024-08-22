@@ -244,18 +244,32 @@ Example:
 Returns:  
 `CALIBRATION_RESET`
 
-## FULL_SCALE
+## SET_FULL_SCALE
 
-`FULL_SCALE` can be used to set the full-scale range of the DAC outputs to something other than the default 10V. This could be useful if a voltage divider or external circuit is used to alter the range of the DACs and you want to have this scale factored in automatically.
+`SET_FULL_SCALE` can be used to set the full-scale range of the DAC outputs to something other than the default 10V. This could be useful if a voltage divider or external circuit is used to alter the range of the DACs and you want to have this scale factored in automatically. It can also be used if the internal voltage reference of the DAC is changed.
 
 Syntax:  
-`FULL_SCALE,{DAC positive full-scale range in Volts}`
+`FULL_SCALE,{DAC positive full-scale range in *Volts*}`
 
 Example (Setting the full scale range to 5V):  
 `FULL_SCALE,5.0`
 
 Returns:  
 `FULL_SCALE_UPDATED`
+
+## READ_FULL_SCALE
+
+`READ_FULL_SCALE` returns the current positive full-scale range of the DAC outputs.
+
+Syntax:  
+`READ_FULL_SCALE`
+
+Example
+`READ_FULL_SCALE`
+
+Returns:  
+`{Current DAC full scale value in volts}`
+
 
 # EEPROM/CALIBRATION FUNCTIONS
 
@@ -367,6 +381,19 @@ Example:
 
 Returns:
 `CAL ALL ADC EEPROM VALUES WITH DAC...FW 2 SAVED,{....}, FW 127 SAVED, CALIBRATION_FINISHED`
+
+## WRITE_FULL_SCALE_EEPROM
+
+`WRITE_FULL_SCALE_EEPROM` is used to permanently save the current DAC full scale value in EEPROM, which will loaded during reboot/power-on. The write-protect jumper must be installed. This would normally be used when the internal voltage reference IC for the DAC is changed.
+
+Syntax:  
+`WRITE_FULL_SCALE_EEPROM`
+
+Example:  
+`WRITE_FULL_SCALE_EEPROM`
+
+Returns:
+`FULL_SCALE {Full scale value} SAVED`
 
 # MASTER/SLAVE FUNCTIONS
 
