@@ -249,10 +249,10 @@ Returns:
 `SET_FULL_SCALE` can be used to set the full-scale range of the DAC outputs to something other than the default 10V. This could be useful if a voltage divider or external circuit is used to alter the range of the DACs and you want to have this scale factored in automatically. It can also be used if the internal voltage reference of the DAC is changed.
 
 Syntax:  
-`FULL_SCALE,{DAC positive full-scale range in *Volts*}`
+`SET_FULL_SCALE,{DAC positive full-scale range in *Volts*}`
 
 Example (Setting the full scale range to 5V):  
-`FULL_SCALE,5.0`
+`SET_FULL_SCALE,5.0`
 
 Returns:  
 `FULL_SCALE_UPDATED`
