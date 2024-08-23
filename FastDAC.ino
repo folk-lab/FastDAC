@@ -47,7 +47,7 @@
 
 #define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
-#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
+//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
@@ -122,7 +122,8 @@ typedef struct AWGwave
 AWGwave g_awgwave[AWGMAXWAVES];
 
 volatile uint8_t g_numwaves;
-volatile uint8_t g_numargramps;
+volatile uint8_t g_waveselect[AWGMAXWAVES];
+
 
 typedef struct ARGramp
 {
@@ -134,6 +135,9 @@ typedef struct ARGramp
 }ARGramp;
 
 ARGramp *g_argramp[ARGMAXRAMPS];
+
+volatile uint8_t g_numargramps;
+volatile uint8_t g_argselect[ARGMAXRAMPS];
 
 volatile uint32_t g_numloops;
 volatile uint32_t g_loopcount;
@@ -2505,7 +2509,7 @@ void check_wave(InCommand *incommand)
 
 
 
-//INT_ARG_RAMP,<number of arg ramps><dac channels assigned to arg 0>,<dac channels assigned to arg n>,<dac channels>,<adc channels>,
+//INT_ARG_RAMP,<arg ramp buffers>,<dac channels assigned to arg 1>,<dac channels assigned to arg n>,<dac channels to linear ramp>,<adc channels>,
 //<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of samples per setpoint>
 void int_arg_ramp(InCommand *incommand)
 {
@@ -2521,8 +2525,10 @@ void int_arg_ramp(InCommand *incommand)
     syntax_error();
     return;
   }
-
-  g_numargramps = atoi(incommand->token[1]); //First parameter
+  
+  char * argselect = incommand->token[1]; //First parameter
+  //g_numargramps = atoi(incommand->token[1]); //First parameter
+  g_numargramps = strlen(argselect);
   if(g_numargramps > ARGMAXRAMPS)
   {
     range_error();
@@ -2530,14 +2536,26 @@ void int_arg_ramp(InCommand *incommand)
     //SERIALPORT.println(AWGMAXWAVES);
     return;
   }
+  //define selected ramps and check range
+  for(i = 0; i < g_numargramps; i++)
+  {
+    g_argselect[i] = argselect[i] - '0';
+    if(g_argselect[i] >= ARGMAXRAMPS)
+    {
+      range_error();
+      return;
+    }
+  }
   g_lowdacs = false;
   g_highdacs = false;
   for(i = 0; i < g_numargramps; i++)
   {
     char * channelsramp = incommand->token[i + 2];
-    g_argramp[i]->numDACchannels = strlen(channelsramp);
-    //g_argramp[i]->setpointcount = 0;
-    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    //g_argramp[i]->numDACchannels = strlen(channelsramp);
+    g_argramp[g_argselect[i]]->numDACchannels = strlen(channelsramp);
+    
+    //for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    for(j = 0; j < g_argramp[g_argselect[i]]->numDACchannels; j++)
     {
       uint8_t argdac = channelsramp[j] - '0';
       if(argdac >= NUMDACCHANNELS)
@@ -2553,7 +2571,8 @@ void int_arg_ramp(InCommand *incommand)
       {
         g_lowdacs = true;
       }
-      g_argramp[i]->DACchanselect[j] = argdac;
+      //g_argramp[i]->DACchanselect[j] = argdac;
+      g_argramp[g_argselect[i]]->DACchanselect[j] = argdac;
     }
   }
 #ifdef DEBUGRAMP
@@ -2562,11 +2581,14 @@ void int_arg_ramp(InCommand *incommand)
   for(i = 0; i < g_numargramps; i++)
   {
     SERIALPORT.print("ARG ");
-    SERIALPORT.print(i);
+    //SERIALPORT.print(i);
+    SERIALPORT.print(g_argselect[i]);
     SERIALPORT.print(" DAC Channels: ");
-    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    //for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    for(j = 0; j < g_argramp[g_argselect[i]]->numDACchannels; j++)
     {
-      SERIALPORT.print(g_argramp[i]->DACchanselect[j]);
+      //SERIALPORT.print(g_argramp[i]->DACchanselect[j]);
+      SERIALPORT.print(g_argramp[g_argselect[i]]->DACchanselect[j]);
       SERIALPORT.print(" ");
     }
     SERIALPORT.println(" ");
@@ -2600,12 +2622,20 @@ void int_arg_ramp(InCommand *incommand)
 
   g_numloops = atoi(incommand->token[g_numrampDACchannels*2+4+g_numargramps]);
   g_numsteps = 0;
+  
+  //Find the longest arg ramp, dictates the number of steps
   for(i = 0; i < g_numargramps; i++)
   {
+    /*
     if(g_argramp[i]->numsetpoints > g_numsteps)
     {
       g_numsteps = g_argramp[i]->numsetpoints;
     }
+    */
+    if(g_argramp[g_argselect[i]]->numsetpoints > g_numsteps)
+    {
+      g_numsteps = g_argramp[g_argselect[i]]->numsetpoints;
+    }   
   }
 
 #ifdef DEBUGRAMP
@@ -2663,10 +2693,16 @@ void int_arg_ramp(InCommand *incommand)
   //Set ARG DACs to initial point
   for(i = 0; i < g_numargramps; i++)
   {
+    /*
     for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
       DACintegersend(g_argramp[i]->DACchanselect[j], g_argramp[i]->setpoint[0]);
     }
+    */
+    for(j = 0; j < g_argramp[g_argselect[i]]->numDACchannels; j++)
+    {
+      DACintegersend(g_argramp[g_argselect[i]]->DACchanselect[j], g_argramp[g_argselect[i]]->setpoint[0]);
+    }   
   }
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
   digitalWrite(ldac0, LOW);
@@ -2751,7 +2787,7 @@ void spec_ana(InCommand * incommand)
   SERIALPORT.println("READ_FINISHED");
 }
 
-//AWG_RAMP,<numwaves>,<dacs waveform 0>,<dacs waveform n>,<dacs to ramp>,<adcs>,<initial dac voltage 1>,<…>,<initial dac voltage n>,
+//AWG_RAMP,<wave buffers>,<dacs waveform 0>,<dacs waveform n>,<dacs to ramp>,<adcs>,<initial dac voltage 1>,<…>,<initial dac voltage n>,
 //<final dac voltage 1>,<…>,<final dac voltage n>,<# of waveform repetitions at each ramp step>,<# of ramp steps>
 void awg_ramp(InCommand *incommand)
 {
@@ -2766,7 +2802,10 @@ void awg_ramp(InCommand *incommand)
     return;
   }
   int i, j;
-  g_numwaves = atoi(incommand->token[1]); //First parameter
+
+  char * waveselect = incommand->token[1]; //First parameter
+  g_numwaves = strlen(waveselect); 
+  //g_numwaves = atoi(incommand->token[1]); //First parameter
   if(g_numwaves > AWGMAXWAVES)
   {
     range_error();
@@ -2774,15 +2813,29 @@ void awg_ramp(InCommand *incommand)
     //SERIALPORT.println(AWGMAXWAVES);
     return;
   }
+  //define selected waves and check range
+  for(i = 0; i < g_numwaves; i++)
+  {
+    g_waveselect[i] = waveselect[i] - '0';
+    if(g_waveselect[i] >= AWGMAXWAVES)
+    {
+      range_error();
+      return;
+    }
+  }
   g_lowdacs = false;
   g_highdacs = false;
   for(i = 0; i < g_numwaves; i++)
   {
     char * channelswave = incommand->token[i + 2];
-    g_awgwave[i].numDACchannels = strlen(channelswave);
-    g_awgwave[i].samplecount = 0;
-    g_awgwave[i].setpointcount = 0;
-    for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    //g_awgwave[i].numDACchannels = strlen(channelswave);
+    //g_awgwave[i].samplecount = 0;
+    //g_awgwave[i].setpointcount = 0;
+    g_awgwave[g_waveselect[i]].numDACchannels = strlen(channelswave);
+    g_awgwave[g_waveselect[i]].samplecount = 0;
+    g_awgwave[g_waveselect[i]].setpointcount = 0;
+    //for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    for(j = 0; j < g_awgwave[g_waveselect[i]].numDACchannels; j++)
     {
       uint8_t wavedac = channelswave[j] - '0';
       if(wavedac >= NUMDACCHANNELS)
@@ -2798,7 +2851,8 @@ void awg_ramp(InCommand *incommand)
       {
         g_lowdacs = true;
       }
-      g_awgwave[i].DACchanselect[j] = wavedac;
+      //g_awgwave[i].DACchanselect[j] = wavedac;
+      g_awgwave[g_waveselect[i]].DACchanselect[j] = wavedac;
     }
   }
 
@@ -2808,11 +2862,14 @@ void awg_ramp(InCommand *incommand)
   for(i = 0; i < g_numwaves; i++)
   {
     SERIALPORT.print("Wave ");
-    SERIALPORT.print(i);
+    //SERIALPORT.print(i);
+    SERIALPORT.print(g_waveselect[i]);
     SERIALPORT.print(" DAC Channels: ");
-    for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    //for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    for(j = 0; j < g_awgwave[g_waveselect[i]].numDACchannels; j++)
     {
-      SERIALPORT.print(g_awgwave[i].DACchanselect[j]);
+      //SERIALPORT.print(g_awgwave[i].DACchanselect[j]);
+      SERIALPORT.print(g_awgwave[g_waveselect[i]].DACchanselect[j]);
       SERIALPORT.print(" ");
     }
     SERIALPORT.println(" ");
@@ -2901,9 +2958,15 @@ void awg_ramp(InCommand *incommand)
   //Set AWG DACs to initial point
   for(i = 0; i < g_numwaves; i++)
   {
+    /*
     for(j = 0; j < g_awgwave[i].numDACchannels; j++)
     {
       DACintegersend(g_awgwave[i].DACchanselect[j], g_awgwave[i].setpoint[0]);
+    }
+    */
+    for(j = 0; j < g_awgwave[g_waveselect[i]].numDACchannels; j++)
+    {
+      DACintegersend(g_awgwave[g_waveselect[i]].DACchanselect[j], g_awgwave[g_waveselect[i]].setpoint[0]);
     }
   }
 
@@ -2928,7 +2991,7 @@ void awg_ramp(InCommand *incommand)
   SERIALPORT.println("RAMP_FINISHED");
 }
 
-//AWG_ARG_RAMP,<numwaves>,<dacs waveform 0>,<dacs waveform n>,<num arg ramps>,<dacs arg 0>,<dacs arg n>,
+//AWG_ARG_RAMP,<waves>,<dacs waveform 0>,<dacs waveform n>,<arg ramps>,<dacs arg 0>,<dacs arg n>,
 //<dacs to ramp>,<adcs>,<initial dac voltage 1>,<…>,<initial dac voltage n>,
 //<final dac voltage 1>,<…>,<final dac voltage n>,<# of waveform repetitions at each ramp step>
 void awg_arg_ramp(InCommand *incommand)
@@ -2944,7 +3007,11 @@ void awg_arg_ramp(InCommand *incommand)
     return;
   }
   int i, j;
-  g_numwaves = atoi(incommand->token[1]); //First parameter
+
+  char * waveselect = incommand->token[1]; //First parameter
+  g_numwaves = strlen(waveselect); 
+  //g_numwaves = atoi(incommand->token[1]); //First parameter
+
   if(g_numwaves > AWGMAXWAVES)
   {
     range_error();
@@ -2952,15 +3019,29 @@ void awg_arg_ramp(InCommand *incommand)
     //SERIALPORT.println(AWGMAXWAVES);
     return;
   }
+  //define selected waves and check range
+  for(i = 0; i < g_numwaves; i++)
+  {
+    g_waveselect[i] = waveselect[i] - '0';
+    if(g_waveselect[i] >= AWGMAXWAVES)
+    {
+      range_error();
+      return;
+    }
+  }  
   g_lowdacs = false;
   g_highdacs = false;
   for(i = 0; i < g_numwaves; i++)
   {
     char * channelswave = incommand->token[i + 2];
-    g_awgwave[i].numDACchannels = strlen(channelswave);
-    g_awgwave[i].samplecount = 0;
-    g_awgwave[i].setpointcount = 0;
-    for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    //g_awgwave[i].numDACchannels = strlen(channelswave);
+    //g_awgwave[i].samplecount = 0;
+    //g_awgwave[i].setpointcount = 0;
+    g_awgwave[g_waveselect[i]].numDACchannels = strlen(channelswave);
+    g_awgwave[g_waveselect[i]].samplecount = 0;
+    g_awgwave[g_waveselect[i]].setpointcount = 0;    
+    //for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    for(j = 0; j < g_awgwave[g_waveselect[i]].numDACchannels; j++)
     {
       uint8_t wavedac = channelswave[j] - '0';
       if(wavedac >= NUMDACCHANNELS)
@@ -2976,7 +3057,8 @@ void awg_arg_ramp(InCommand *incommand)
       {
         g_lowdacs = true;
       }
-      g_awgwave[i].DACchanselect[j] = wavedac;
+      //g_awgwave[i].DACchanselect[j] = wavedac;
+      g_awgwave[g_waveselect[i]].DACchanselect[j] = wavedac;
     }
   }
 
@@ -2986,17 +3068,22 @@ void awg_arg_ramp(InCommand *incommand)
   for(i = 0; i < g_numwaves; i++)
   {
     SERIALPORT.print("Wave ");
-    SERIALPORT.print(i);
+    //SERIALPORT.print(i);
+    SERIALPORT.print(g_waveselect[i]);
     SERIALPORT.print(" DAC Channels: ");
-    for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    //for(j = 0; j < g_awgwave[i].numDACchannels; j++)
+    for(j = 0; j < g_awgwave[g_waveselect[i]].numDACchannels; j++)
     {
-      SERIALPORT.print(g_awgwave[i].DACchanselect[j]);
+      //SERIALPORT.print(g_awgwave[i].DACchanselect[j]);
+      SERIALPORT.print(g_awgwave[g_waveselect[i]].DACchanselect[j]);
       SERIALPORT.print(" ");
     }
     SERIALPORT.println(" ");
   }
 #endif
-  g_numargramps = atoi(incommand->token[g_numwaves + 2]); //Number of arg ramps
+  char * argselect = incommand->token[g_numwaves + 2];
+  //g_numargramps = atoi(incommand->token[g_numwaves + 2]); //Number of arg ramps
+  g_numargramps = strlen(argselect); //Number of arg ramps
   if(g_numargramps > ARGMAXRAMPS)
   {
     range_error();
@@ -3004,13 +3091,25 @@ void awg_arg_ramp(InCommand *incommand)
     //SERIALPORT.println(AWGMAXWAVES);
     return;
   }
+  //define selected ramps and check range
+  for(i = 0; i < g_numargramps; i++)
+  {
+    g_argselect[i] = argselect[i] - '0';
+    if(g_argselect[i] >= ARGMAXRAMPS)
+    {
+      range_error();
+      return;
+    }
+  }  
   for(i = 0; i < g_numargramps; i++)
   {
     //char * channelsramp = incommand->token[i + g_numwaves + 2];
     char * channelsramp = incommand->token[i + g_numwaves + 3];
-    g_argramp[i]->numDACchannels = strlen(channelsramp);
-    //g_argramp[i].setpointcount = 0;
-    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    //g_argramp[i]->numDACchannels = strlen(channelsramp);
+    g_argramp[g_argselect[i]]->numDACchannels = strlen(channelsramp);
+    
+    //for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    for(j = 0; j < g_argramp[g_argselect[i]]->numDACchannels; j++)
     {
       uint8_t argdac = channelsramp[j] - '0';
       if(argdac >= NUMDACCHANNELS)
@@ -3026,7 +3125,8 @@ void awg_arg_ramp(InCommand *incommand)
       {
         g_lowdacs = true;
       }
-      g_argramp[i]->DACchanselect[j] = argdac;
+      //g_argramp[i]->DACchanselect[j] = argdac;
+      g_argramp[g_argselect[i]]->DACchanselect[j] = argdac;
     }
   }
 #ifdef DEBUGRAMP
@@ -3035,11 +3135,14 @@ void awg_arg_ramp(InCommand *incommand)
   for(i = 0; i < g_numargramps; i++)
   {
     SERIALPORT.print("ARG ");
-    SERIALPORT.print(i);
+    //SERIALPORT.print(i);
+    SERIALPORT.print(g_argselect[i]);
     SERIALPORT.print(" DAC Channels: ");
-    for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    //for(j = 0; j < g_argramp[i]->numDACchannels; j++)
+    for(j = 0; j < g_argramp[g_argselect[i]]->numDACchannels; j++)
     {
-      SERIALPORT.print(g_argramp[i]->DACchanselect[j]);
+      //SERIALPORT.print(g_argramp[i]->DACchanselect[j]);
+      SERIALPORT.print(g_argramp[g_argselect[i]]->DACchanselect[j]);
       SERIALPORT.print(" ");
     }
     SERIALPORT.println(" ");
@@ -3075,12 +3178,19 @@ void awg_arg_ramp(InCommand *incommand)
  
   g_numloops=atoi(incommand->token[g_numrampDACchannels*2 + 5 + g_numwaves + g_numargramps]);
   g_numsteps = 0;
+  //Find the longest arg ramp, dictates the number of steps
   for(i = 0; i < g_numargramps; i++)
   {
+    /*
     if(g_argramp[i]->numsetpoints > g_numsteps)
     {
       g_numsteps = g_argramp[i]->numsetpoints;
     }
+    */
+    if(g_argramp[g_argselect[i]]->numsetpoints > g_numsteps)
+    {
+      g_numsteps = g_argramp[g_argselect[i]]->numsetpoints;
+    }   
   }
 
 #ifdef DEBUGRAMP
@@ -3134,19 +3244,31 @@ void awg_arg_ramp(InCommand *incommand)
   //Set AWG DACs to initial point
   for(i = 0; i < g_numwaves; i++)
   {
+    /*
     for(j = 0; j < g_awgwave[i].numDACchannels; j++)
     {
       DACintegersend(g_awgwave[i].DACchanselect[j], g_awgwave[i].setpoint[0]);
+    }
+    */
+    for(j = 0; j < g_awgwave[g_waveselect[i]].numDACchannels; j++)
+    {
+      DACintegersend(g_awgwave[g_waveselect[i]].DACchanselect[j], g_awgwave[g_waveselect[i]].setpoint[0]);
     }
   }
   //Set ARG DACs to initial point
   for(i = 0; i < g_numargramps; i++)
   {
+    /*
     for(j = 0; j < g_argramp[i]->numDACchannels; j++)
     {
       DACintegersend(g_argramp[i]->DACchanselect[j], g_argramp[i]->setpoint[0]);
     }
-  }  
+    */
+    for(j = 0; j < g_argramp[g_argselect[i]]->numDACchannels; j++)
+    {
+      DACintegersend(g_argramp[g_argselect[i]]->DACchanselect[j], g_argramp[g_argselect[i]]->setpoint[0]);
+    }   
+  }
   
   delayMicroseconds(2); //Need at least 2 microseconds from SYNC rise to LDAC fall
   digitalWrite(ldac0, LOW);
@@ -3376,6 +3498,30 @@ void ramp_event(void)//event for ramp
       {
         for(i = 0; i < g_numwaves; i++)
         {
+          g_awgwave[g_waveselect[i]].samplecount++;
+          
+          if(g_awgwave[g_waveselect[i]].samplecount >= g_awgwave[g_waveselect[i]].numsamples[g_awgwave[g_waveselect[i]].setpointcount]) //got all samples, go to next setpoint
+          {
+            g_awgwave[g_waveselect[i]].samplecount = 0;
+            g_awgwave[g_waveselect[i]].setpointcount++;
+            if(g_awgwave[g_waveselect[i]].setpointcount >= g_awgwave[g_waveselect[i]].numsetpoints) //waveform complete, go to next loop
+            {
+              g_nextloop = true;
+              g_awgwave[g_waveselect[i]].setpointcount = 0;
+            }
+            //If we aren't finished update wave dacs
+            if((g_nextloop == false) || (g_loopcount < (g_numloops - 1)) || (g_stepcount < (g_numsteps - 1)))
+            {
+              for(j = 0; j < g_awgwave[g_waveselect[i]].numDACchannels; j++)
+              {
+                DACintegersend(g_awgwave[g_waveselect[i]].DACchanselect[j], g_awgwave[g_waveselect[i]].setpoint[g_awgwave[g_waveselect[i]].setpointcount]);
+              }
+            }          
+          }
+        }
+        /*
+        for(i = 0; i < g_numwaves; i++)
+        {
           g_awgwave[i].samplecount++;
           
           if(g_awgwave[i].samplecount >= g_awgwave[i].numsamples[g_awgwave[i].setpointcount]) //got all samples, go to next setpoint
@@ -3397,6 +3543,7 @@ void ramp_event(void)//event for ramp
             }          
           }
         }
+        */
       }
       if(g_nextloop)
       {
@@ -3434,6 +3581,7 @@ void ramp_event(void)//event for ramp
               //SERIALPORT.print(",");
             }
             //get next arbitrary ramp DAC step ready
+            /*
             for(i = 0; i < g_numargramps; i++)
             {
               if(g_stepcount < g_argramp[i]->numsetpoints)
@@ -3441,6 +3589,17 @@ void ramp_event(void)//event for ramp
                 for(j = 0; j < g_argramp[i]->numDACchannels; j++)
                 {
                   DACintegersend(g_argramp[i]->DACchanselect[j], g_argramp[i]->setpoint[g_stepcount]);
+                }
+              }
+            }
+            */
+            for(i = 0; i < g_numargramps; i++)
+            {
+              if(g_stepcount < g_argramp[g_argselect[i]]->numsetpoints)
+              {
+                for(j = 0; j < g_argramp[g_argselect[i]]->numDACchannels; j++)
+                {
+                  DACintegersend(g_argramp[g_argselect[i]]->DACchanselect[j], g_argramp[g_argselect[i]]->setpoint[g_stepcount]);
                 }
               }
             }

@@ -511,17 +511,17 @@ Returns:
 
 ## AWG_RAMP
 
-Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, as well as number of ramp steps. Additionally, you select the number of independent waveforms, The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. If the waveforms are different lengths, the repetition counter will increment when any waveform completes.
+Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, as well as number of ramp steps. Additionally, you select which waveform buffers to use, The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. If the waveforms are different lengths, the repetition counter will increment when any waveform completes.
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
 The `{DACs to ramp}` parameter can be specified as `N` if no DAC channels should ramp
 
 Syntax:  
-`AWG_RAMP,{number of independent waveforms},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step},{# of ramp steps}`
+`AWG_RAMP,{waveform buffers to use},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step},{# of ramp steps}`
 
-Example (Use 1 waveform, assign DAC 7 to waveform 0, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step, 100 ramp steps):  
-`AWG_RAMP,1,7,13,0,-5000,-2500,5000,2500,10,100`
+Example (Use waveform buffers 3 and 1, assign DAC 7 to waveform 3, assign DAC 4 to waveform 1, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step, 100 ramp steps):  
+`AWG_RAMP,31,7,4,13,0,-5000,-2500,5000,2500,10,100`
 
 Returns:  
 `{# of steps * number of samples in wave * number of repetitions * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
@@ -603,34 +603,34 @@ Returns:
 
 ## INT_ARG_RAMP
 
-Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, but no longer specify the `number of steps` as this is decided by the longest selected ARG ramp. Additionally, you select the number of independent ARG ramps, The DAC channels assigned to each ARG ramp, and the number of samples to take at each ramp step. If the ARG ramps are different lengths, the shorter ARG ramps will stay at their final setpoint until the longest ARG ramp completes.
+Similar to `INT_RAMP` you specify which ADC channels to sample and DAC channels to ramp, but no longer specify the `number of steps` as this is decided by the longest selected ARG ramp. Additionally, you select the ARG ramp buffers to use, The DAC channels assigned to each ARG ramp, and the number of samples to take at each ramp step. If the ARG ramps are different lengths, the shorter ARG ramps will stay at their final setpoint until the longest ARG ramp completes.
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
 The `{DACs to ramp}` parameter can be specified as `N` if no DAC channels should linear-ramp
 
 Syntax:  
-`INT_ARG_RAMP,{number of independent ARG ramps},{DAC channels assigned to ARG 0},{...},{DAC channels assigned to ARG N},{DACs to linear-ramp},{ADCs to sample},{Initial linear DAC voltage 1},{...},{Initial linear DAC voltage N},{Final linear DAC voltage 1},{...},{Final linear DAC voltage N},{# of samples at each ramp step}`
+`INT_ARG_RAMP,{ARG ramp buffers to use},{DAC channels assigned to ARG buffer 1},{...},{DAC channels assigned to ARG buffer N},{DACs to linear-ramp},{ADCs to sample},{Initial linear DAC voltage 1},{...},{Initial linear DAC voltage N},{Final linear DAC voltage 1},{...},{Final linear DAC voltage N},{# of samples at each ramp step}`
 
-Example (Use 1 ARG ramp, assign DACs 0,1,2,3 to ARG 0, linear-ramp DAC 4, Sample ADC 0, Start DAC 4 at -5V, Finish DAC 4 at 5V, Take 10 samples at each ramp step):  
-`INT_ARG_RAMP,1,0123,4,0,-5000,5000,10`
+Example (Use ARG ramp buffers 0 and 2, assign DACs 0,1,2,3 to ARG 0, assign DAC 5 to ARG 2, linear-ramp DAC 4, Sample ADC 0, Start DAC 4 at -5V, Finish DAC 4 at 5V, Take 10 samples at each ramp step):  
+`INT_ARG_RAMP,02,0123,5,4,0,-5000,5000,10`
 
 Returns:  
-`{number of setpoints in ARG 0 * number of samples to take * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
+`{number of setpoints in longest selected ARG * number of samples to take * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
 
 ## AWG_ARG_RAMP
 
-Similar to `AWG_RAMP` you specify which ADC channels, linear-ramp DAC channels, the number of independent AWG waveforms, The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. Additionally, the number of independent ARB ramps is also selected, and the DAC channels assigned to each ARB ramp. Unlike `AWG_RAMP`, the `# of ramp steps` parameter is determined by the length of the longest ARB ramp selected.
+Similar to `AWG_RAMP` you specify which ADC channels, linear-ramp DAC channels, AWG waveform buffers, The DAC channels assigned to each waveform, and the number of waveform repetitions at each ramp step. Additionally, the ARG ramp buffers are selected, and the DAC channels assigned to each ARG ramp. Unlike `AWG_RAMP`, the `# of ramp steps` parameter is determined by the length of the longest ARB ramp selected.
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
 The `{DACs to ramp}` parameter can be specified as `N` if no linear-DAC channels should ramp
 
 Syntax:  
-`AWG_ARG_RAMP,{number of independent waveforms},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{number of independent ARG ramps},{DAC channels assigned to ARG 0},{...},{DAC channels assigned to ARG N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step}`
+`AWG_ARG_RAMP,{waveform buffers},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{ARG ramp buffers},{DAC channels assigned to ARG buffer 1},{...},{DAC channels assigned to ARG buffer N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step}`
 
-Example (Use 1 AWG waveform, assign DAC 7 to waveform 0, use one ARB ramp, assign DAC 2 to ARB 0, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step):  
-`AWG_RAMP,1,7,1,2,13,0,-5000,-2500,5000,2500,10`
+Example (Use AWG waveform buffer 3, assign DAC 7 to waveform 3, use ARG ramp buffer 5, assign DAC 2 to ARG 5, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step):  
+`AWG_RAMP,3,7,5,2,13,0,-5000,-2500,5000,2500,10`
 
 Returns:  
 `{# setpoints in ARG ramp * number of samples in wave * number of repetitions * number of selected adc channels * 16-bit integer samples}RAMP_FINISHED`
