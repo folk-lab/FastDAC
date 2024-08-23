@@ -9,7 +9,7 @@
 #define SERIALPORT SerialUSB
 #endif
 
-#define FW_VER "SERVICE-GIGA-TEST5"
+#define FW_VER "SERVICE-GIGA-TEST6"
 
 #define IDSTRING "FASTDAC"
 

@@ -47,7 +47,7 @@
 
 #define DACSETTLEMICROS 2000 //microseconds to wait before starting ramp
 
-//#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
+#define DEBUGRAMP //Uncomment this to enable sending of ramp debug info (actually debug info in general)
 
 #define BAUDRATE 1750000 //Tested with UM232H from regular arduino UART
 
@@ -3169,7 +3169,7 @@ void awg_arg_ramp(InCommand *incommand)
   SERIALPORT.println("RAMP_FINISHED");
 }
 
-void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of steps>
+void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac voltage 1>,...<initial dac voltage n>,<final dac voltage 1>,...<final dac voltage n>,<number of samples per step>,<number of steps>
 {
   int i;
     //check for minimum number of parameters
@@ -3178,7 +3178,7 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
     return;
   }
   
-  if(incommand->paramcount < 4)
+  if(incommand->paramcount < 5)
   {
     syntax_error();
     return;
@@ -3205,11 +3205,10 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
   g_loopcount = 0;
   g_nextloop = false;
 
-  g_numloops = 1; //take only 1 sample at each step
   g_numwaves = 0; //no arbitrary waves for int_ramp
   g_numargramps = 0;//no arbitrary ramps for int_ramp
   //Do some bounds checking
-  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (incommand->paramcount != g_numrampDACchannels * 2 + 4))
+  if((g_numrampDACchannels > NUMDACCHANNELS) || (g_numrampADCchannels > NUMADCCHANNELS) || (incommand->paramcount != g_numrampDACchannels * 2 + 5))
   {
     syntax_error();
     return;
@@ -3257,10 +3256,13 @@ void int_ramp(InCommand *incommand)//<dac channels>,<adc channels>,<initial dac 
   }
   //g_numsteps=(DB[g_numrampDACchannels*2+3].toInt());
 
-  g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+3]);
+  g_numsteps = atoi(incommand->token[g_numrampDACchannels*2+4]);
+  g_numloops = atoi(incommand->token[g_numrampDACchannels*2+3]);
   #ifdef DEBUGRAMP
   SERIALPORT.print("numsteps: ");
   SERIALPORT.println(g_numsteps);
+  SERIALPORT.print("numloops: ");
+  SERIALPORT.println(g_numloops);  
   #endif  
   //configure DAC channels
   g_configurerampDACchannels();

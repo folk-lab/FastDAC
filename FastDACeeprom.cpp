@@ -209,7 +209,7 @@ float readeepromdacfullsc(void)
   {
     SERIALPORT.print("DAC FULLSCALE: ");
     SERIALPORT.print(*dacfullsc);
-    SERIALPORT.println(" uninitialized!! setting to ");
+    SERIALPORT.print(" uninitialized!! setting to ");
     SERIALPORT.println(DEFAULT_DAC_VSCALE);
     *dacfullsc = DEFAULT_DAC_VSCALE;
     writeeepromdacfullsc(*dacfullsc);

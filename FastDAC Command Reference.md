@@ -66,22 +66,22 @@ Returns:
 
 ## INT_RAMP
 
-`INT_RAMP` ramps the specified DAC channels from the initial voltages to the final voltages and reads the specified ADC channels in a synchronized manner in a specified number of steps. It uses the ADC in a continuous sampling mode, and therefore there is no delay between updating the DAC output and acquiring the next ADC samples. While the ADC is acquiring the current samples, the next DAC step output values are being preloaded into the DAC, to be output synchronously as soon as the ADC samples are ready. The sample rate of this function is consistent, and capable of the maximum throughput of the ADC even while updating up to 8 DAC channels.
+`INT_RAMP` ramps the specified DAC channels from the initial voltages to the final voltages and reads the specified ADC channels in a synchronized manner in a specified number of steps. The number of samples to take at each step is also specified. It uses the ADC in a continuous sampling mode, and therefore there is no delay between updating the DAC output and acquiring the next ADC samples. While the ADC is acquiring the current samples, the next DAC step output values are being preloaded into the DAC, to be output synchronously as soon as the ADC samples are ready. The sample rate of this function is consistent, and capable of the maximum throughput of the ADC even while updating up to 8 DAC channels.
 
 Oversampling, in order to do additional filtering by the control PC, is achieved by specifying a large number of steps (max 2^31-1). Each DAC channel's output value is treated as a 64-bit integer, and is scaled back to a 16-bit integer before being sent to the DAC. This allows a large number of samples to be taken without actually incrementing the 16-bit DAC output. 
 
 A ramp can be stopped at any time by sending the command `STOP`.
 
 Syntax (ALL mV):  
-`INT_RAMP,{DAC channels},{ADC channels},{initial DAC voltage 1},{...},{initial DAC voltage n},{final DAC voltage 1},{...},{final dac voltage n},{# of steps}`
+`INT_RAMP,{DAC channels},{ADC channels},{initial DAC voltage 1},{...},{initial DAC voltage n},{final DAC voltage 1},{...},{final dac voltage n},{# of samples at each step},{# of steps}`
 
 Do not add commas between specified channels. The `{DAC channels}` parameter can be specified as `N` if no DAC channels should ramp
 
-Example (ramping DAC channels 0, 6, and 7, while reading from ADC channels 0, 2, and 3):  
-`INT_RAMP,067,023,-1000,-2000,-3000,3000,4000,5000,1000`
+Example (ramping DAC channels 0, 6, and 7, while reading from ADC channels 0, 2, and 3. Take 1000 steps and 10 samples at each step):  
+`INT_RAMP,067,023,-1000,-2000,-3000,3000,4000,5000,10,1000`
 
 Returns:  
-`{# of steps x number of selected adc channels x 16-bit integer samples}RAMP_FINISHED`
+`{# of steps * # of samples per step * number of selected adc channels x 16-bit integer samples}RAMP_FINISHED`
 
 ## SPEC_ANA
 
