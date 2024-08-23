@@ -518,7 +518,7 @@ A ramp can be stopped at any time by sending the command `STOP`.
 The `{DACs to ramp}` parameter can be specified as `N` if no DAC channels should ramp
 
 Syntax:  
-`AWG_RAMP,{waveform buffers to use},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step},{# of ramp steps}`
+`AWG_RAMP,{waveform buffers to use},{DAC channels assigned to waveform 1},{...},{DAC channels assigned to waveform N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step},{# of ramp steps}`
 
 Example (Use waveform buffers 3 and 1, assign DAC 7 to waveform 3, assign DAC 4 to waveform 1, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step, 100 ramp steps):  
 `AWG_RAMP,31,7,4,13,0,-5000,-2500,5000,2500,10,100`
@@ -627,7 +627,7 @@ A ramp can be stopped at any time by sending the command `STOP`.
 The `{DACs to ramp}` parameter can be specified as `N` if no linear-DAC channels should ramp
 
 Syntax:  
-`AWG_ARG_RAMP,{waveform buffers},{DAC channels assigned to waveform 0},{...},{DAC channels assigned to waveform N},{ARG ramp buffers},{DAC channels assigned to ARG buffer 1},{...},{DAC channels assigned to ARG buffer N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step}`
+`AWG_ARG_RAMP,{waveform buffers},{DAC channels assigned to waveform 1},{...},{DAC channels assigned to waveform N},{ARG ramp buffers},{DAC channels assigned to ARG buffer 1},{...},{DAC channels assigned to ARG buffer N},{DACs to ramp},{ADCs to sample},{Initial DAC voltage 1},{...},{Initial DAC voltage N},{Final DAC voltage 1},{...},{Final DAC voltage N},{# of waveform repetitions at each ramp step}`
 
 Example (Use AWG waveform buffer 3, assign DAC 7 to waveform 3, use ARG ramp buffer 5, assign DAC 2 to ARG 5, Ramp DACs 1 and 3, Sample ADC 0, Start DAC 1 at -5V, Start DAC 3 at -2.5V, Finish DAC 1 at 5V, Finish DAC 3 at 2.5V, Repeat waveform 10 times at each ramp step):  
 `AWG_RAMP,3,7,5,2,13,0,-5000,-2500,5000,2500,10`
