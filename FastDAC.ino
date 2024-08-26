@@ -639,6 +639,10 @@ void router(InCommand *incommand)
     { 
       check_wave(incommand);
     }
+    else if(strcmp("CHECK_WAVE_CRC", cmd) == 0)  
+    { 
+      check_wave_crc(incommand);
+    }    
     else if(strcmp("ADD_RAMP", cmd) == 0)  
     {  
       add_ramp(incommand);
@@ -2505,6 +2509,51 @@ void check_wave(InCommand *incommand)
   SERIALPORT.print(g_awgwave[wavenumber].numsetpoints);
   SERIALPORT.print(",");
   SERIALPORT.println(totalsamples);  
+}
+
+//CHECK_WAVE_CRC,<wave number>
+//Returns WAVE,<wave number>,<total number of setpoints>,<total number of samples>,
+//<CRC32 calculated partially with setpoint array and finally num samples array>
+void check_wave_crc(InCommand *incommand) 
+{
+  if(incommand->paramcount != 2)
+  {
+    syntax_error();
+    return;
+  }
+  //uint8_t wavenumber = DB[1].toInt();
+  uint8_t wavenumber = atoi(incommand->token[1]);
+  uint32_t totalsamples = 0;  
+  if(wavenumber >= AWGMAXWAVES)
+  {
+    range_error();
+    //SERIALPORT.print("ERROR, Max waveforms = ");
+    //SERIALPORT.println(AWGMAXWAVES);
+    return;
+  }
+  for(uint32_t i = 0; i < g_awgwave[wavenumber].numsetpoints; i++)
+  {
+    totalsamples += (g_awgwave[wavenumber].numsamples[i]);
+  }
+  send_ack();
+  uint32_t crc = 0;
+  if(g_awgwave[wavenumber].numsetpoints > 0)
+  {
+    mbed::MbedCRC<POLY_32BIT_ANSI, 32> ct;
+    ct.compute_partial_start(&crc);
+    ct.compute_partial((void *)&(g_awgwave[wavenumber].setpoint[0]), (g_awgwave[wavenumber].numsetpoints * 2), &crc);
+    ct.compute_partial((void *)&(g_awgwave[wavenumber].numsamples[0]), (g_awgwave[wavenumber].numsetpoints * 4), &crc);
+    ct.compute_partial_stop(&crc);
+  }
+
+  SERIALPORT.print("WAVE,");
+  SERIALPORT.print(wavenumber);
+  SERIALPORT.print(",");
+  SERIALPORT.print(g_awgwave[wavenumber].numsetpoints);
+  SERIALPORT.print(",");
+  SERIALPORT.print(totalsamples);
+  SERIALPORT.print(",");
+  SERIALPORT.println(crc);    
 }
 
 

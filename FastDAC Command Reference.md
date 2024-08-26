@@ -496,6 +496,21 @@ Example (for waveform in example above):
 Returns:  
 `WAVE,0,4,200`
 
+## CHECK_WAVE_CRC
+
+`CHECK_WAVE_CRC` returns how many setpoints, and the total number of samples have been configured for the specified wave number (0-7), followed by a byte-by-byte CRC-32 checksum calculated firstly for the array of `setpoints` in the wave and finally for the array of `number of samples per setpoint` as if they were a contiguous block of memory. The `setpoints` are stored in the internal memory as little-endian signed 16-bit integers, and the `number of samples per setpoint` are stored as little-endian unsigned 32-bit integers, so this must be taken into account to get a correct CRC-32 match.
+
+The floating point voltage values are scaled to integers by the FastDAC using the following equation `round((voltage / FULL_SCALE) * 0x8000)` where `voltage` is in volts, and `FULL_SCALE` is current full-scale voltage of the DACs (usually 10.0V). The setpoint must be in the range of -FULL_SCALE to +(FULL_SCALE - 1 bit). The same scaling equation must be used to get a CRC match.
+
+Syntax:  
+`CHECK_WAVE_CRC,{wave number}`
+
+Example (for waveform in example above):  
+`CHECK_WAVE_CRC,0`
+
+Returns:  
+`WAVE,0,4,200,282563044`
+
 ## CLR_WAVE
 
 `CLR_WAVE` resets the number of configured setpoints for a specified waveform back to 0
@@ -547,7 +562,9 @@ Returns:
 
 `ADD_RAMP_RAW` is used to configure the arbitrary ramp DAC setpoints by sending a stream of 16-bit integers rather than the floating point values of `ADD_RAMP`. The ramps can be filled ~4x faster this way, at a rate of approximately 100,000 points per second. The user specifies the ramp number to fill, and the number of samples to be sent in the stream as the command, which is then followed by the stream of samples. The function can be called multiple times until up to 400,000 setpoints have been stored, but unlike `ADD_RAMP` it is possible to send all 400,000 points as a single stream. If the specified number of samples have not yet been received, and no additional samples have been received for 3 seconds, the FastDAC will return `TIMEOUT` followed by the regular response.
 
-The setpoints should be sent as big-endian (high byte first) signed 16-bit integers, where -32768 to 32767 maps to -10 to +10V (actually +9.999695V). This is different from the offset-binary format returned by the ADC.
+The setpoints should be sent as big-endian (high byte first) signed 16-bit integers, where -32768 to 32767 maps to -FULL_SCALE to +(FULL_SCALE - 1 bit) Where FULL_SCALE is the DAC full-scale range and 1 bit represents FULL_SCALE/32768. This is different from the offset-binary format returned by the ADC.
+
+The scaling equation normally used by the FastDAC is `round((voltage / g_dac_full_scale) * 0x8000)` after checking that the setpoint falls inside the range of -FULLSCALE to +(FULLSCALE - 1 bit).
 
 The first part of the command, specifying the ramp number and number of samples has the usual `\r` (carriage return), `\n` (newline) at the end and the FastDAC will return `ACK` and wait for the samples, the stream that follows does not require these end of message charaters.
 

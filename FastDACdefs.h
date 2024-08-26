@@ -1,15 +1,9 @@
 //#ifndef FASTDACDEFS_H
 //#define FASTDACDEFS_H
 
-#define OPTICAL //Comment this if still using old USB version
-
-#ifdef OPTICAL
 #define SERIALPORT Serial2
-#else
-#define SERIALPORT SerialUSB
-#endif
 
-#define FW_VER "SERVICE-GIGA-TEST6"
+#define FW_VER "SERVICE-GIGA-TEST7"
 
 #define IDSTRING "FASTDAC"
 
