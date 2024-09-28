@@ -191,6 +191,7 @@ mbed::SPI adspi(digitalPinToPinName(mosi), digitalPinToPinName(miso), digitalPin
 mbed::DigitalOut dac0cs(digitalPinToPinName(dac0));
 mbed::DigitalOut dac1cs(digitalPinToPinName(dac1));
 mbed::DigitalOut adccs(digitalPinToPinName(adc));
+
 //events::EventQueue queue(32 * EVENTS_EVENT_SIZE);
 //rtos::Thread pidThread;
 typedef enum MS_select {MASTER, SLAVE, INDEP} MS_select;
@@ -220,6 +221,7 @@ void setup()
   pinMode(ext_clock_led, OUTPUT); //on board clock ok led output
   digitalWrite(clock_led, LOW);
   digitalWrite(ext_clock_led, LOW);
+  disable_wifibt();
   
   pinMode(ldac0,OUTPUT);
   digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
@@ -336,6 +338,20 @@ void print_interrupt_active(void)
   //SERIALPORT.print(NVIC_GetEnableIRQ(SysTick_IRQn));
   //SERIALPORT.print(",");
 }
+
+void disable_wifibt(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct;
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_RESET); //Disable wifi  
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); //Disable bt
+}
+
 
 void set_all_int_priorities(uint32_t priority)
 {
