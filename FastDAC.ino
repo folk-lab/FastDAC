@@ -229,7 +229,7 @@ void setup()
   digitalWrite(ldac0,HIGH); //Load DAC pin for DAC0. Make it LOW if not in use.
   pinMode(ldac1,OUTPUT);
   digitalWrite(ldac1,HIGH); //Load DAC pin for DAC1. Make it LOW if not in use.
-
+  disable_wifibt();
   pinMode(reset, OUTPUT);  
   //pinMode(drdy, INPUT);  //Data ready pin for the ADC.
   pinMode(led, OUTPUT);  //Used for blinking indicator LED
@@ -339,6 +339,19 @@ void print_interrupt_active(void)
   //SERIALPORT.print("Systick:");  
   //SERIALPORT.print(NVIC_GetEnableIRQ(SysTick_IRQn));
   //SERIALPORT.print(",");
+}
+
+void disable_wifibt(void)
+{
+  GPIO_InitTypeDef GPIO_InitStruct;
+  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_RESET); //Disable wifi  
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_10, GPIO_PIN_RESET); //Disable bt
 }
 
 void set_all_int_priorities(uint32_t priority)

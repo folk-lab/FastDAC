@@ -3,7 +3,7 @@
 
 #define SERIALPORT Serial2
 
-#define FW_VER "SERVICE-GIGA-TEST7"
+#define FW_VER "SERVICE-GIGA-TEST8"
 
 #define IDSTRING "FASTDAC"
 
