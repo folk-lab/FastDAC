@@ -142,7 +142,7 @@ Returns:
 
 ## ADC_CH_ZERO_SC_CAL
 
-`ADC_CH_ZERO_SC_CAL` performs a system zero calibration on the specified ADC channel, where the input of the selected ADC channel should be held at 0VDC. This will calibrate out any offsets in the system due to the ADC itself, or any signal conditioning on the input. The function will return the calibration constant that has been stored to the ADC system zero-scale cal register, which can be noted or saved for restoring a calibration later. It is preferable to repeat this calibration any time the conversion time is changed using `CONVERT_TIME`, especially when using conversion times less than 300µs.
+`ADC_CH_ZERO_SC_CAL` performs a system zero calibration on the specified ADC channel, where the input of the selected ADC channel should be held at 0VDC. This will calibrate out any offsets in the system due to the ADC itself, or any signal conditioning on the input. The function will return the calibration constant that has been stored to the ADC system zero-scale cal register, which can be noted or saved for restoring a calibration later.
 
 Syntax:  
 `ADC_CH_ZERO_SC_CAL,{adc channel}`
@@ -155,7 +155,7 @@ Returns:
 
 ## ADC_CH_FULL_SC_CAL
 
-`ADC_CH_FULL_SC_CAL` performs a system full-scale calibration on the specified ADC channel, where the input of the selected ADC channel should be held at positive full-scale (typically 10VDC). This will calibrate out gain errors in the system due to the ADC itself, or any signal conditioning on the input. The function will return the calibration constant that has been stored to the ADC system full-scale cal register, which can be noted or saved for restoring a calibration later. It is preferable to repeat this calibration any time the conversion time is changed using `CONVERT_TIME`, especially when using conversion times less than 300µs.
+`ADC_CH_FULL_SC_CAL` performs a system full-scale calibration on the specified ADC channel, where the input of the selected ADC channel should be held at positive full-scale (typically 10VDC). This will calibrate out gain errors in the system due to the ADC itself, or any signal conditioning on the input. The function will return the calibration constant that has been stored to the ADC system full-scale cal register, which can be noted or saved for restoring a calibration later. 
 
 Syntax:  
 `ADC_CH_FULL_SC_CAL,{adc channel}`
